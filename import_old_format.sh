@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+fullname=$(realpath  $0)
+SOURCEDIR=${fullname%/*}
+export PATH=$PATH:$SOURCEDIR
+#________________________
+
 vdir=/System/Volumes/Data/Unix/Videos/Raw
 
 function sqlrun {
@@ -22,22 +27,26 @@ function process_line {
 	section=$4
 	start_time=$5
 	end_time=$6
+	mod_time=$7
 
 	sqlrun "insert or ignore into program(name) values ('$program');"
 	sqlrun "insert or ignore into series(program_id,series_number,max_episodes) 
 		values ((select id from program where name='$program'),$series,0);"
 	sqlrun "insert or ignore into episode(series_id,episode_number,status) 
 		values ((select series_id from videos where series_number=$series and program_name='$program'),$episode,0);"
-	sqlrun "insert into section(episode_id,section_number,start_time,end_time,raw_file_id)
+	sqlrun "insert into section(episode_id,section_number,start_time,end_time,raw_file_id,last_updated)
 	values ((select episode_id from videos where series_number=$series 
 	and program_name='$program' and episode_number=$episode),
 	$section,strftime('%H:%M:%f','$start_time'),strftime('%H:%M:%f','$end_time'),
-	(select id from raw_file where name='$name'));"
+	(select id from raw_file where name='$name'),'$mod_time');"
 }
 function process_info {
+	local ts=$(stat -f "%Sm" -t "%Y-%m-%dT%H:%M:%S" $info)
+	local ts2=101
 	for rec in $(cat $info)
 	do
-		process_line $(tr ',' ' '<<<$rec)
+		process_line $(tr ',' ' '<<<$rec) ${ts}.$ts2
+		((ts2++))
 	done
 	
 }
@@ -45,7 +54,7 @@ for fn in $(find "$vdir" -type f -name "*mp4"|sort --version-sort)
 do
 	info=${fn/\.mp4/.info}
 	name=${fn##*/}
-	video_length=$(./mp4_length.pl $fn)
+	video_length=$(mp4_length.pl $fn)
 	sqlrun "insert or replace into raw_file(id,name,video_length,last_updated,status)
 		values ((select id from raw_file where name='$name'),
 		'$name',strftime('%H:%M:%f','$video_length'),datetime('now'),4);"

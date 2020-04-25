@@ -42,6 +42,7 @@ CREATE TABLE section (
 	start_time datetime,
 	end_time datetime,
 	raw_file_id integer,
+	last_updated datetime DEFAULT CURRENT_TIMESTAMP,
 	status integer,
 	UNIQUE(episode_id,section_number)
 	constraint fk_episode
@@ -59,10 +60,16 @@ create table status (
 	name varchar2,
 	primary key (table_name,id)
 	);
+create table new_files (
+	id integer PRIMARY KEY AUTOINCREMENT,
+	name varchar unique,
+	video_length datetime,
+    last_updated datetime
+	);
 create view videos as select a.id program_id,a.name program_name,
 	b.id series_id, b.series_number,b.max_episodes,
 	c.id episode_id,c.episode_number,c.status episode_status,
-	d.id section_id,d.section_number,d.start_time,d.end_time,
+	d.id section_id,d.section_number,d.start_time,d.end_time,d.last_updated,
 	e.name file_name,e.video_length
 	from program a
 	left outer join series b on b.program_id=a.id
