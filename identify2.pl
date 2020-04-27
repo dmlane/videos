@@ -39,7 +39,7 @@ sub expand {
 
 sub connect_db {
     $dbh = DBI->connect( $dsn, $userid, $password, { RaiseError => 1 } )
-      or die $DBI::errstr;
+        or die $DBI::errstr;
     print "Opened database successfully\n";
 }
 
@@ -79,9 +79,8 @@ sub choose_start_point {
             @list,
             sprintf(
                 "%-32s: %s-%d-%d-%d",
-                $_->{file_name},     $_->{program_name},
-                $_->{series_number}, $_->{episode_number},
-                $_->{section_number}
+                $_->{file_name},      $_->{program_name}, $_->{series_number},
+                $_->{episode_number}, $_->{section_number}
             )
         );
     }
@@ -94,21 +93,19 @@ sub choose_start_point {
 }
 
 sub fetch_new_files {
-    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp,
-        $sfn, $rv );
+    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv );
 
     #Get a list of all files in $dir which haven't already been processed
     connect_db();
     for $fn ( sort { expand($a) cmp expand($b) } <$dir/V*.mp4> ) {
-        $info         = get_mp4info($fn);
-        $vhours       = int( $info->{MM} / 60 );
-        $vmins        = int( $info->{MM} % 60 );
-        $video_length = sprintf( "%02d:%02d:%02d.%003d",
-            $vhours, $vmins, $info->{SS}, $info->{MS} );
+        $info   = get_mp4info($fn);
+        $vhours = int( $info->{MM} / 60 );
+        $vmins  = int( $info->{MM} % 60 );
+        $video_length
+            = sprintf( "%02d:%02d:%02d.%003d", $vhours, $vmins, $info->{SS}, $info->{MS} );
         $epoch_timestamp = ( stat($fn) )[9];
         $sfn             = basename($fn);
-        $stmt =
-          qq(insert or ignore into new_files (name,video_length,last_updated)
+        $stmt            = qq(insert or ignore into new_files (name,video_length,last_updated)
 	  					values('$sfn',strftime('%H:%M:%f','$video_length'),datetime($epoch_timestamp,'unixepoch','localtime')));
         $rv = $dbh->do($stmt) or die $DBI::errstr;
     }
@@ -130,8 +127,8 @@ sub process_new_files {
 
 sub process {
 
-   # Open database
-   # Process all new files, with the option of re-processing the last 9 sections
+    # Open database
+    # Process all new files, with the option of re-processing the last 9 sections
 
     #get_last8();  # Fetch last 9 sections processed into array $fetch_array
     #choose_start_point();
