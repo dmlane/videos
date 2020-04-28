@@ -1,9 +1,12 @@
 #!/usr/bin/env perl -w
 use strict;
+use Pod::Usage;
 use DBI;
 use MP4::Info;
+use Getopt::Std;
 use Term::Menus;
 use File::Basename;
+use Carp qw( croak );
 
 my ($dir) = @ARGV;
 $dir = "/System/Volumes/Data/Unix/Videos/Import" unless defined $dir;
@@ -13,6 +16,8 @@ my $dsn      = "DBI:SQLite:dbname=$database";
 my $userid   = "";
 my $password = "";
 my $dbh      = "";
+
+my $unit_test;
 
 my $fetch_array;
 my $all_new;
@@ -28,6 +33,16 @@ our $q_get_new_files = qq(
                where not exists (select '1' from raw_file where raw_file.name=new_files.name)
          order by last_updated
 );
+use constant maxChoice => 5;
+our @old_choice = ("") x maxChoice;
+
+sub init {
+    my %opts;
+    getopts( "d:u:", \%opts );
+    die pod2usage( verbose => 1 ) if $ARGV[0];
+    $dir       = $opts{'d'} if exists $opts{'d'};
+    $unit_test = $opts{u}   if exists $opts{'u'};
+}
 
 sub expand {
 
@@ -67,8 +82,46 @@ sub get_new_files {
     close_db();
 }
 
+sub bright_colour {
+    return chr(27) . '[1;33m' . $_ . chr(27) . '[21;39m';
+}
+
+sub dim_colour {
+    return chr(27) . '[2m' . $_ . chr(27) . '[22m';
+}
+
+sub high1 {
+
+    # Highlight first character
+    my $work = $1;
+    $work =~ s/^(.)(.*)/\x1b[0;33m\1\x1b[21;39m\2/;
+    return $work;
+}
+
 sub what_next {
+    my $prompt = sprintf(
+        "What next? (%s, %s, %s, %s, %s or %s\n",
+        high1("section"), high1("file"),    high1("Episode"),
+        high1("Series"),  high1("Program"), high1("Quit")
+    );
+    my @current_choice = @_;
+    my @delta          = @_;
+    for ( my $n = 0; $n < maxChoice; $n++ ) {
+        if ( $current_choice[$n] ne $old_choice[$n] ) {
+            $delta[$n]      = bright_colour( $current_choice[$n] );
+            $old_choice[$n] = $current_choice[$n];
+        }
+        else {
+            $delta[$n] = dim_colour( $current_choice[$n] );
+        }
+
+    }
+
     ReadMode('cbreak');
+    printf("==========\n");
+    printf
+        "file=$delta[0] Program=$delta[1] Series=$delta[2] Episode=$delta[3] Section=$delta[4]\n";
+
     printf;
 }
 
@@ -125,7 +178,8 @@ sub process_new_files {
 
 }
 
-sub process {
+sub main {
+    init();
 
     # Open database
     # Process all new files, with the option of re-processing the last 9 sections
@@ -139,4 +193,38 @@ sub process {
     print "hello\n";
 }
 
-process();
+eval { main() };
+warn    if $@;
+exit(1) if $@;
+
+#=========================== POD ============================#
+
+=head1 NAME
+
+  identify_videos.pl - Identify new videos and cut points in mp4 input
+
+=head1 SYNOPSIS
+
+  identify_videos.pl [-d directory] [-u unit_test] 
+
+=head1 ARGUMENTS
+
+=over 4
+
+=item *
+<directory>	Directory to process for new video files (instead of default)
+
+=item *
+  <unit_test>	Unit test to run
+
+=back
+
+=head1 SEE ALSO
+
+  -
+
+=head1 COPYRIGHT
+
+  Dave Lane (April 2020)
+
+=cut
