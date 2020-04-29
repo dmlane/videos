@@ -29,7 +29,9 @@ CREATE TABLE episode (
 
 CREATE TABLE raw_file (
 	id integer PRIMARY KEY AUTOINCREMENT,
-	name varchar,
+	name varchar unique,
+	k1 varchar,
+	k2 integer,
 	video_length datetime,
 	last_updated datetime,
 	status integer
@@ -60,17 +62,11 @@ create table status (
 	name varchar2,
 	primary key (table_name,id)
 	);
-create table new_files (
-	id integer PRIMARY KEY AUTOINCREMENT,
-	name varchar unique,
-	video_length datetime,
-    last_updated datetime
-	);
 create view videos as select a.id program_id,a.name program_name,
 	b.id series_id, b.series_number,b.max_episodes,
 	c.id episode_id,c.episode_number,c.status episode_status,
 	d.id section_id,d.section_number,d.start_time,d.end_time,d.last_updated,
-	e.name file_name,e.video_length
+	e.name file_name,e.video_length,e.status raw_status,e.k1,e.k2
 	from program a
 	left outer join series b on b.program_id=a.id
 	left outer join episode c on c.series_id=b.id

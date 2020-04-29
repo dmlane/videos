@@ -23,12 +23,14 @@ my $userid   = "";
 my $password = "";
 my $dbh;
 
-sub connect_db {
+sub connect_db
+{
     $dbh = DBI->connect( $dsn, $userid, $password, { RaiseError => 1 } )
         or die $DBI::errstr;
 }
 
-sub close_db {
+sub close_db
+{
     $dbh->disconnect();
 }
 
@@ -38,7 +40,8 @@ sub close_db {
 Fetch the results of the select provided into a hash array
 =cut
 
-sub db_fetch {
+sub db_fetch
+{
     my ($stmt) = @_;
     my $results;
     connect_db();
@@ -53,7 +56,8 @@ sub db_fetch {
 Retrieve the last 8 sections processed from database
 =cut
 
-sub get_last8_sections {
+sub get_last8_sections
+{
     my $q_get_last8 = qq(
 	select * from 
 	   (select program_name,series_number,episode_number,section_number,last_updated,file_name
@@ -64,27 +68,35 @@ sub get_last8_sections {
     return ( db_fetch $q_get_last8);
 }
 
+=head2 get_last_values
+=cut
+
+sub get_last_values
+{
+    my @defaults
+        = ( { program_name => "", series_number => 1, episode_number => 1, section_number => 0 } );
+    return db_fetch(
+        qq(
+                        select program_name,series_number,episode_number,section_number from
+                        videos where raw_status = 1 order by k1,k2 desc limit 1 )
+    );
+}
+
 =head2 fetch_new_files
 Insert details of any new files found in $dir into the table new_files. We remove any files
 already present in raw_file (as it means they have already been partially or fully processed)
 =cut
 
-sub fetch_new_files {
-    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv, $result );
-
-    #sub expand {
-    #
-    #    # Used to sort files in version order
-    #    my $file = shift;
-    #    $file =~ s{(\d+)}{sprintf "%06d", $1}eg;    # expand all numbers to 6 digits
-    #    return $file;
-    #}
+sub fetch_new_files
+{
+    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv, $result,
+        $k1, $k2 );
 
     #Get a list of all files in $dir which haven't already been processed
     connect_db();
 
-    #for $fn ( sort { expand($a) cmp expand($b) } <$dir/V*.mp4> ) {
-    for $fn (<$dir/V*.mp4>) {
+    for $fn (<$dir/V*.mp4>)
+    {
         $info   = get_mp4info($fn);
         $vhours = int( $info->{MM} / 60 );
         $vmins  = int( $info->{MM} % 60 );
@@ -92,35 +104,67 @@ sub fetch_new_files {
             = sprintf( "%02d:%02d:%02d.%003d", $vhours, $vmins, $info->{SS}, $info->{MS} );
         $epoch_timestamp = ( stat($fn) )[9];
         $sfn             = basename($fn);
-        $stmt            = qq(insert or ignore into new_files (name,video_length,last_updated)
-	  					values('$sfn',strftime('%H:%M:%f','$video_length'),
-								datetime($epoch_timestamp,'unixepoch','localtime')));
+        if ( $sfn =~ m/^([^_]*_[^_]*_[^_]*)\./ )
+        {
+            $k1 = $1;
+            $k2 = 0;
+        }
+        else
+        {
+
+            ( $k1, $k2 ) = ( $sfn =~ /^(.*)_(\d+)\..*$/ );
+        }
+        $stmt = qq(insert or ignore into raw_file (name,k1,k2,video_length,last_updated,status)
+	  					values('$sfn','$k1',$k2,strftime('%H:%M:%f','$video_length'),
+								datetime($epoch_timestamp,'unixepoch','localtime'),0));
         $rv = $dbh->do($stmt) or die $DBI::errstr;
     }
 
-    # Remove any records which already exist in main tables
-    $stmt = qq(delete from  new_files
-               where exists (select '1' from raw_file where raw_file.name=new_files.name));
-    $rv = $dbh->do($stmt) or die $DBI::errstr;
     close_db();
 
     # Get records into an array
     $result = db_fetch(
         qq(
-		select name,video_length,last_updated from  new_files
-		            where not exists (select '1' from raw_file where raw_file.name=new_files.name)
-		      order by last_updated;
+		select name,video_length,last_updated from  raw_file
+		            where status=0
+		      order by k1,k2;
 			  )
     );
-    printf "I've found %d new files to process\n", scalar @{$result};
+    printf "There are now %d new files to process\n", scalar @{$result};
     return $result;
+}
+
+=head2 process_new_files
+=cut
+
+sub process_new_files
+{
+    my ( $program, $series, $episode, $section ) = ( "", 0, 0, 0 );
+    my ($all_new) = @_;
+    my $action;
+    my $last_values = get_last_values();
+    if ( @{$last_values} )
+    {
+        ( $program, $series, $episode, $section ) = get_last_values();
+    }
+
+    foreach my $file ( @{$all_new} )
+    {
+        #$action=get_action($file,$program,$episode,$section);
+        printf "==========\n\n";
+        printf
+            "file=$file->{name} Program=$program Series=$series Episode=$episode Section=$section\n";
+        print $file->{name} . "\n";
+
+    }
 }
 
 =head2  init
 Process parameters and initialize variables
 =cut
 
-sub init {
+sub init
+{
     my %opts;
     getopts( "d:u:", \%opts );
     die pod2usage( verbose => 1 ) if $ARGV[0];
@@ -129,16 +173,18 @@ sub init {
 
 }
 
-sub main {
+sub main
+{
 
     # Process parameters and initialize variables
     init();
 
     # Get last 8 sections of video processed
-    our $last8_sections = get_last8_sections();
+    #our $last8_sections = get_last8_sections();
 
     # Put a list of new mp4 files on filesystem into table new_files
-    our $all_new = fetch_new_files();
+    my $all_new = fetch_new_files();
+    process_new_files($all_new);
 
     printf("Hello");
 
