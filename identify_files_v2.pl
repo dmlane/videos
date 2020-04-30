@@ -6,6 +6,8 @@ use MP4::Info;
 use Getopt::Std;
 use Term::Menus;
 use File::Basename;
+use Term::ReadKey;
+use Switch;
 use Carp qw( croak );
 
 #=========================================================================#
@@ -73,8 +75,6 @@ sub get_last8_sections
 
 sub get_last_values
 {
-    my @defaults
-        = ( { program_name => "", series_number => 1, episode_number => 1, section_number => 0 } );
     return db_fetch(
         qq(
                         select program_name,series_number,episode_number,section_number from
@@ -134,27 +134,108 @@ sub fetch_new_files
     return $result;
 }
 
+=head2 process_file
+=cut
+
+sub process_file
+{
+    my ( $previous, $current ) = @_;
+    my $prompt = "";
+    my $char;
+    my $HI    = chr(27) . '[1;33m';
+    my $LO    = chr(27) . '[0m';
+    my %delta = %{$current};
+    my @nm    = ( "file", "Program", "Series", "Episode", "Section" );
+    foreach my $key ( keys %{$current} )
+    {
+        unless ( $current->{$key} eq $previous->{$key} )
+        {
+            $delta{$key} = $HI . $delta{$key} . $LO;
+            $previous->{$key} = $current->{$key};
+        }
+    }
+    printf "File %s Program %s Series %d Episode %d Section %d\n", $delta{file}, $delta{program},
+        $delta{series}, $delta{episode}, $delta{section};
+
+    while (1)
+    {
+        ReadMode('cbreak');
+        printf("===========\n${prompt}\n");
+        printf "What next? (section, file, Episode, Series, Program, Quit): \n";
+
+        $char = ReadKey(0);
+        ReadMode('normal');
+        switch ($char)
+        {
+            case 'P' { $current->{program} = get_program( $current->{program} ) }
+            case 'S' { $current->{series}  = get_integer( "Series", $current->{series} ) }
+            case 'E'
+            {
+                $current->{episode} = get_integer( "Episode", $current->{episode} + 1 );
+                $current->{section} = 0
+            }
+            case 'f' { $fn = "#" }
+            case 's'
+            {
+                $current->{section} = get_integer( "section", $current->{section} + 1 );
+                $start_time         = "00:00:00.000";
+                $end_time           = $video_length;
+                while (1)
+                {
+                    $start_time = get_timestamp( "Start time", $start_time );
+                    $end_time   = get_timestamp( "End time",   $end_time );
+                    $this_result = "$program,$series,$episode,$section,$start_time,$end_time";
+                    printf "\n$this_result --> $info_file\n";
+                    ReadMode('cbreak');
+                    my $char = " ";
+                    printf "OK?";
+                    $char = ReadKey(0);
+                    ReadMode('normal');
+                    last if $char eq "Y" or $char eq "y";
+                }
+                printf INFO "$this_result\n";
+                $lastline = "$fn: $this_result";
+                $discard  = shift(@buff);
+                push( @buff, $lastline );
+
+            }
+            case 'Q'
+            {
+                unlink $proc_file or die "Cannot rm $proc_file";
+                exit(0)
+            }
+        }
+    }
+
+}
+
 =head2 process_new_files
 =cut
 
 sub process_new_files
 {
-    my ( $program, $series, $episode, $section ) = ( "", 0, 0, 0 );
+    my %previous_value = ( file => "", program => "", series => 1, episode => 1, section => 0 );
+    my %current_value  = ( file => "", program => "", series => 1, episode => 1, section => 0 );
+
+    my $prompt;
+
+    my ( $program, $series, $episode, $section ) = ( "", 1, 1, 0 );
     my ($all_new) = @_;
     my $action;
     my $last_values = get_last_values();
     if ( @{$last_values} )
     {
-        ( $program, $series, $episode, $section ) = get_last_values();
+        (   $current_value{program}, $current_value{series},
+            $current_value{episode}, $current_value{section}
+        ) = get_last_values();
     }
 
     foreach my $file ( @{$all_new} )
     {
+        $current_value{file} = $file->{name};
+
         #$action=get_action($file,$program,$episode,$section);
-        printf "==========\n\n";
-        printf
-            "file=$file->{name} Program=$program Series=$series Episode=$episode Section=$section\n";
-        print $file->{name} . "\n";
+        process_file( \%previous_value, \%current_value );
 
     }
 }
