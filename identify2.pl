@@ -36,7 +36,8 @@ our $q_get_new_files = qq(
 use constant maxChoice => 5;
 our @old_choice = ("") x maxChoice;
 
-sub init {
+sub init
+{
     my %opts;
     getopts( "d:u:", \%opts );
     die pod2usage( verbose => 1 ) if $ARGV[0];
@@ -44,7 +45,8 @@ sub init {
     $unit_test = $opts{u}   if exists $opts{'u'};
 }
 
-sub expand {
+sub expand
+{
 
     # Used to sort files in version order
     my $file = shift;
@@ -52,17 +54,20 @@ sub expand {
     return $file;
 }
 
-sub connect_db {
+sub connect_db
+{
     $dbh = DBI->connect( $dsn, $userid, $password, { RaiseError => 1 } )
         or die $DBI::errstr;
     print "Opened database successfully\n";
 }
 
-sub close_db {
+sub close_db
+{
     $dbh->disconnect();
 }
 
-sub get_last8 {
+sub get_last8
+{
 
     # Retrieve the last 8 sections processed from database
     connect_db();
@@ -72,7 +77,8 @@ sub get_last8 {
     close_db();
 }
 
-sub get_new_files {
+sub get_new_files
+{
 
     # Fetch all new files into all_new array
     connect_db();
@@ -82,15 +88,18 @@ sub get_new_files {
     close_db();
 }
 
-sub bright_colour {
+sub bright_colour
+{
     return chr(27) . '[1;33m' . $_ . chr(27) . '[21;39m';
 }
 
-sub dim_colour {
+sub dim_colour
+{
     return chr(27) . '[2m' . $_ . chr(27) . '[22m';
 }
 
-sub high1 {
+sub high1
+{
 
     # Highlight first character
     my $work = $1;
@@ -98,7 +107,8 @@ sub high1 {
     return $work;
 }
 
-sub what_next {
+sub what_next
+{
     my $prompt = sprintf(
         "What next? (%s, %s, %s, %s, %s or %s\n",
         high1("section"), high1("file"),    high1("Episode"),
@@ -106,12 +116,15 @@ sub what_next {
     );
     my @current_choice = @_;
     my @delta          = @_;
-    for ( my $n = 0; $n < maxChoice; $n++ ) {
-        if ( $current_choice[$n] ne $old_choice[$n] ) {
+    for ( my $n = 0; $n < maxChoice; $n++ )
+    {
+        if ( $current_choice[$n] ne $old_choice[$n] )
+        {
             $delta[$n]      = bright_colour( $current_choice[$n] );
             $old_choice[$n] = $current_choice[$n];
         }
-        else {
+        else
+        {
             $delta[$n] = dim_colour( $current_choice[$n] );
         }
 
@@ -125,9 +138,11 @@ sub what_next {
     printf;
 }
 
-sub choose_start_point {
+sub choose_start_point
+{
     my @list;
-    foreach ( @{$fetch_array} ) {
+    foreach ( @{$fetch_array} )
+    {
         push(
             @list,
             sprintf(
@@ -145,12 +160,14 @@ sub choose_start_point {
     print "SELECTION = '$selection'\n";
 }
 
-sub fetch_new_files {
+sub fetch_new_files
+{
     my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv );
 
     #Get a list of all files in $dir which haven't already been processed
     connect_db();
-    for $fn ( sort { expand($a) cmp expand($b) } <$dir/V*.mp4> ) {
+    for $fn ( sort { expand($a) cmp expand($b) } <$dir/V*.mp4> )
+    {
         $info   = get_mp4info($fn);
         $vhours = int( $info->{MM} / 60 );
         $vmins  = int( $info->{MM} % 60 );
@@ -170,15 +187,18 @@ sub fetch_new_files {
     close_db();
 }
 
-sub process_new_files {
+sub process_new_files
+{
     get_new_files();
-    foreach ( @{$all_new} ) {
+    foreach ( @{$all_new} )
+    {
 
     }
 
 }
 
-sub main {
+sub main
+{
     init();
 
     # Open database
