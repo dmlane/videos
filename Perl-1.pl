@@ -2,6 +2,17 @@
 #use Term::ANSIScreen  qw/:color :cursor :screen :keyboard/;
 use strict;
 
+
+
+
+
+
+
+
+
+
+
+#
 use Clipboard;
 Clipboard->copy('#');
 my $res     = "#";
