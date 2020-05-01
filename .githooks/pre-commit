@@ -19,14 +19,16 @@ do
   git show ":$file" |"$formatter" > "$file.tmp"
   # Create a blob object from the formatted file
   hash=`git hash-object -w "$file.tmp"`
+  perms=$(git ls-files -s "$file"|awk '{print $1}')
+
   # Add it back to index
   #git update-index --add --cacheinfo 100644 "$hash" "$file"
   git update-index --add --cacheinfo 100755 "$hash" "$file"
+  git update-index --add --cacheinfo $perms  "$hash" "$file"
   # Remove the tmp file
   #cat "$file.tmp" >"${file}" && rm "$file.tmp"
   rm "$file.tmp"
   git show ":$file" > "$file"
-  chmod 755 "$file"
 done
 
 # If no files left in index after formatting - fail
