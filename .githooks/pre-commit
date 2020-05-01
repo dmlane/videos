@@ -26,6 +26,7 @@ do
   #cat "$file.tmp" >"${file}" && rm "$file.tmp"
   rm "$file.tmp"
   git show ":$file" > "$file"
+  chmod 755 "$file"
 done
 
 # If no files left in index after formatting - fail
