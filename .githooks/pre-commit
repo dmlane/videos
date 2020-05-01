@@ -23,7 +23,7 @@ do
 
   # Add it back to index
   #git update-index --add --cacheinfo 100644 "$hash" "$file"
-  git update-index --add --cacheinfo 100755 "$hash" "$file"
+  #git update-index --add --cacheinfo 100755 "$hash" "$file"
   git update-index --add --cacheinfo $perms  "$hash" "$file"
   # Remove the tmp file
   #cat "$file.tmp" >"${file}" && rm "$file.tmp"
