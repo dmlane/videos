@@ -10,6 +10,7 @@ use Term::ReadKey;
 use Switch;
 use Clipboard;
 use Carp qw( croak );
+use Term::Screen;
 
 #=========================================================================#
 
@@ -25,6 +26,19 @@ my $dsn      = "DBI:SQLite:dbname=$database";
 my $userid   = "";
 my $password = "";
 my $dbh;
+my $scr = Term::Screen->new() or die "Cannot run Term::Screen->new";
+my @buff;
+
+sub print_history
+{
+    my $y = $scr->rows() - @buff - 2;
+    foreach (@buff)
+    {
+        $scr->at( $y, 0 );
+        printf "$_";
+    }
+
+}
 
 sub connect_db
 {
@@ -139,7 +153,7 @@ sub fetch_new_files
 		      order by k1,k2;
 			  )
     );
-    printf "There are now %d new files to process\n", scalar @{$result};
+    printf STDERR "There are now %d new files to process\n", scalar @{$result};
     return $result;
 }
 
@@ -149,7 +163,7 @@ sub get_integer
     my $value = -1;
     while (1)
     {
-        printf "What $prompt [$default]:";
+        printf STDERR "What $prompt [$default]:";
         $value = <STDIN>;
         chomp $value;
         last if ( length($value) < 1 );
@@ -166,17 +180,21 @@ sub get_timestamp
     sub ctrl_c
     {
         $SIG{INT} = \&ctrl_c;
-        Clipboard->copy($default);
+        Clipboard->copy("#DEFAULT#");
     }
     my $value = "#";
-    printf "What $prompt [Copy to clipboard or ctrl-c for $default] :";
+    Clipboard->copy("0000000000");
+    select()->flush();
+    print STDERR "\nWhat $prompt [Copy to clipboard or ctrl-c for $default] :";
     $SIG{INT} = \&ctrl_c;
     until ( $value =~ /^\d\d:\d\d:\d\d\.\d\d\d/ )
     {
         sleep(1);
         $value = Clipboard->paste;
+        $value = $default if $value eq "#DEFAULT#";
 
     }
+    print STDERR $value . "\n";
 
     $SIG{INT} = 'DEFAULT';
 
@@ -189,7 +207,7 @@ sub get_program
 {
     my ($default) = @_;
     my $value;
-    printf "What is the program name [$default]";
+    printf STDERR "What is the program name [$default]";
     $value = <STDIN>;
     chomp $value;
     return $default if ( length($value) < 1 );
@@ -204,10 +222,13 @@ sub process_file
     my ( $previous, $current, $video_length ) = @_;
     my $prompt = "";
     my $char;
+    my $ichar;
     my $HI = chr(27) . '[1;33m';
+    my $MD = chr(27) . '[1;36m';
     my $LO = chr(27) . '[0m';
     my ( $start_time, $end_time );
     my $result;
+    my ( $start_new, $end_new );
     my %delta;
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
 
@@ -216,13 +237,17 @@ sub process_file
         %delta = %{$current};
         foreach my $key ( keys %{$current} )
         {
-            unless ( $current->{$key} eq $previous->{$key} )
+            if ( $current->{$key} eq $previous->{$key} )
+            {
+                $delta{$key} = $MD . $delta{$key} . $LO;
+            }
+            else
             {
                 $delta{$key} = $HI . $delta{$key} . $LO;
                 $previous->{$key} = $current->{$key};
             }
         }
-        printf "File %s Program %s Series %d Episode %d Section %d\n", $delta{file},
+        printf STDERR "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
             $delta{program},
             $delta{series}, $delta{episode}, $delta{section};
     }
@@ -230,22 +255,31 @@ OUTER: while (1)
     {
         print_changes();
         ReadMode('cbreak');
-        printf("===========\n${prompt}\n");
-        printf "What next? (section, file, Episode, Series, Program, Quit): \n";
+
+        #printf STDERR "===========\n${prompt}\n";
+        #printf STDERR "What next? (section, file, Episode, Series, Program, Quit): \n";
 
         $char = ReadKey(0);
+        printf STDERR $char . "\n";
         ReadMode('normal');
         switch ($char)
         {
+            case "b" { last OUTER; }
+            case "B" { last OUTER; }
             case 'P'
             {
-                $current->{program} = get_program( $current->{program} )
+                $current->{program} = get_program( $current->{program} );
             }
-            case 'S' { $current->{series} = get_integer( "Series", $current->{series} ) }
+            case 'S'
+            {
+                $current->{series} = get_integer( "Series", $current->{series} );
+                print STDERR $current->{series};
+            }
+
             case 'E'
             {
                 $current->{episode} = get_integer( "Episode", $current->{episode} + 1 );
-                $current->{section} = 0
+                $current->{section} = 0;
             }
             case 'f' { last OUTER; }
             case 's'
@@ -255,26 +289,42 @@ OUTER: while (1)
                 $end_time           = $video_length;
             INNER: while (1)
                 {
-                    $start_time = get_timestamp( "Start time", $start_time );
-                    $end_time   = get_timestamp( "End time",   $end_time );
+                    $start_new = get_timestamp( "Start time", $start_time );
+                    $end_new   = get_timestamp( "End time",   $end_time );
                     save_results( $current, $start_time, $end_time );
                     ReadMode('cbreak');
                     my $char = " ";
-                    printf "OK?";
-                    $char = ReadKey(0);
+                    printf STDERR " $start_new -> $end_new     Y=OK (B=Back)?";
+                    $ichar = ReadKey(0);
+                    printf STDERR $ichar . "\n";
                     ReadMode('normal');
-                    last INNER if $char eq "Y" or $char eq "y";
+                    last INNER if $ichar eq "Y" or $ichar eq "y" or $ichar eq "B" or $ichar eq "b";
+                }
+                if ( $ichar eq "Y" or $ichar eq "y" )
+                {
+                    $start_time = $start_new;
+                    $end_time   = $end_new;
                 }
 
             }
-            case 'Q'
+            case "Q"
+            {
+                #unlink $proc_file or die "Cannot rm $proc_file";
+                exit(0)
+            }
+            case "q"
             {
                 #unlink $proc_file or die "Cannot rm $proc_file";
                 exit(0)
             }
         }
     }
-
+    if ( $char eq "b" or $char eq "B" )
+    {
+        # Go back to previous file
+        return 1;
+    }
+    return 0;
 }
 
 =head2 process_new_files
@@ -286,6 +336,8 @@ sub process_new_files
     my %current_value  = ( file => "", program => "", series => 1, episode => 1, section => 0 );
 
     my $prompt;
+    my $file_sub;
+    my $file;
 
     my ( $program, $series, $episode, $section ) = ( "", 1, 1, 0 );
     my ($all_new) = @_;
@@ -297,15 +349,32 @@ sub process_new_files
             $current_value{episode}, $current_value{section}
         ) = get_last_values();
     }
-
-    foreach my $file ( @{$all_new} )
+    $file_sub = 0;
+    while ( $file_sub < @{$all_new} )
     {
+        $file = @{$all_new}[$file_sub];
         $current_value{file} = $file->{name};
+        if ( process_file( \%previous_value, \%current_value, $file->{video_length} ) )
+        {
+            $file_sub--;
+            $file_sub = 0 if $file_sub < 0;
+        }
+        else
+        {
+            $file_sub++;
 
-        #$action=get_action($file,$program,$episode,$section);
-        process_file( \%previous_value, \%current_value, $file->{video_length} );
+        }
 
     }
+
+    #foreach my $file ( @{$all_new} )
+    #{
+    #    $current_value{file} = $file->{name};
+    #
+    #    #$action=get_action($file,$program,$episode,$section);
+    #    process_file( \%previous_value, \%current_value, $file->{video_length} );
+    #
+    #}
 }
 
 =head2  init
@@ -334,8 +403,6 @@ sub main
     # Put a list of new mp4 files on filesystem into table new_files
     my $all_new = fetch_new_files();
     process_new_files($all_new);
-
-    printf("Hello");
 
 }
 
