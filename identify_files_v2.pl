@@ -27,18 +27,110 @@ my $userid   = "";
 my $password = "";
 my $dbh;
 my $scr = Term::Screen->new() or die "Cannot run Term::Screen->new";
-my @buff;
+$scr->clrscr();
+
+my @buff = ("123") x 20;
 
 sub print_history
 {
-    my $y = $scr->rows() - @buff - 2;
-    foreach (@buff)
+    my $rc = $scr->rows();
+    my ( $first_sub, $top_left, $bot_left );
+    if ( $rc < 24 )
     {
-        $scr->at( $y, 0 );
-        printf "$_";
+        $first_sub = 24 - $rc;
+        $top_left  = 0;
+
     }
+    else
+    {
+        $first_sub = 0;
+        $top_left  = $rc - 24;
+    }
+    $bot_left = $rc - 2;
+    $scr->at( $top_left, 0 )->clreos();
+    for ( my $n = $first_sub, my $r = $top_left; $n < 20; $n++, $r++ )
+    {
+        $scr->at( $r, 0 )->puts( $buff[$n] );
+    }
+}
+
+sub get_input
+{
+    my ( $prompt, $numeric, $default ) = @_;
+    my $string = "";
+    my $c;
+    my $bot_left    = $scr->rows() - 2;
+    my $full_prompt = "$prompt [${default}]: ";
+    print_history();
+
+    while ()
+    {
+        $scr->at( $bot_left, 0 )->puts($full_prompt)->clreol()->reverse()->puts($string)->normal();
+        $c = $scr->noecho()->getch();
+        my $o = ord($c);
+        if ( $o == 127 )
+        {
+            $string = substr( $string, 0, -1 ) if length( $string > 0 );
+            next;
+        }
+        last if $c =~ /\r/;
+        if ( $c =~ /\d/ or $numeric == 0 )
+        {
+            $string = $string . $c;
+        }
+    }
+    return $default if length($string) == 0;
+    return $string;
 
 }
+
+sub status
+{
+    my ($p) = @_;
+    my $rc = $scr->rows();
+    $scr->at( $rc, 0 )->clreol()->puts($p);
+}
+
+sub prompt_char
+{
+    my ($full_prompt) = @_;
+    print_history();
+    my $bot_left = $scr->rows() - 2;
+
+    #my $rc=$scr->rows();
+    #my ($first_sub,$top_left,$bot_left);
+    #if ($rc < 24) {
+    #    $first_sub=24-$rc;
+    #    $top_left=0;
+    #
+    #}
+    #else
+    #{
+    #    $first_sub=0;
+    #    $top_left=$rc-24;
+    #}
+    #$bot_left=$rc-2;
+    #$scr->at($top_left,0)->clreos();
+    #for (my $n=$first_sub,my $r=$top_left;$n<20;$n++,$r++)
+    #{
+    #    $scr->at($r,0)->puts($buff[$n]);
+    #}
+    #$scr->at($bot_left,0)->puts($p);
+    #my $c=$scr->getch();
+    $scr->at( $bot_left, 0 )->puts($full_prompt)->clreol();
+    return $scr->getch();
+}
+
+#sub print_history
+#{
+#    my $y = $scr->rows() - @buff - 2;
+#    foreach (@buff)
+#    {
+#        $scr->at( $y, 0 );
+#        printf "$_";
+#    }
+#
+#}
 
 sub connect_db
 {
@@ -114,6 +206,7 @@ sub fetch_new_files
 {
     my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv, $result,
         $k1, $k2 );
+    status("Looking for new files to process");
 
     #Get a list of all files in $dir which haven't already been processed
     connect_db();
@@ -153,24 +246,8 @@ sub fetch_new_files
 		      order by k1,k2;
 			  )
     );
-    printf STDERR "There are now %d new files to process\n", scalar @{$result};
+    status( sprintf "There are now %d new files to process", scalar @{$result} );
     return $result;
-}
-
-sub get_integer
-{
-    my ( $prompt, $default ) = @_;
-    my $value = -1;
-    while (1)
-    {
-        printf STDERR "What $prompt [$default]:";
-        $value = <STDIN>;
-        chomp $value;
-        last if ( length($value) < 1 );
-        last if ( $value =~ /^\d+$/ );
-    }
-    return $default if ( length($value) < 1 );
-    return $value;
 }
 
 sub get_timestamp
@@ -207,9 +284,13 @@ sub get_program
 {
     my ($default) = @_;
     my $value;
-    printf STDERR "What is the program name [$default]";
-    $value = <STDIN>;
+
+    #printf STDERR "What is the program name [$default]";
+    $value = get_input( "What is the program name", 0, $default );
+
+    #$value = <STDIN>;
     chomp $value;
+    status("Program changed from $default to $value");
     return $default if ( length($value) < 1 );
     return ($value);
 }
@@ -247,21 +328,27 @@ sub process_file
                 $previous->{$key} = $current->{$key};
             }
         }
-        printf STDERR "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
+
+        #printf STDERR "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
+        #    $delta{program},
+        #    $delta{series}, $delta{episode}, $delta{section};
+        return sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
             $delta{program},
             $delta{series}, $delta{episode}, $delta{section};
     }
 OUTER: while (1)
     {
-        print_changes();
-        ReadMode('cbreak');
+        $char = prompt_char( print_changes() );
 
-        #printf STDERR "===========\n${prompt}\n";
-        #printf STDERR "What next? (section, file, Episode, Series, Program, Quit): \n";
-
-        $char = ReadKey(0);
-        printf STDERR $char . "\n";
-        ReadMode('normal');
+        #ReadMode('cbreak');
+        #
+        ##printf STDERR "===========\n${prompt}\n";
+        ##printf STDERR "What next? (section, file, Episode, Series, Program, Quit): \n";
+        #
+        #$char = ReadKey(0);
+        #printf STDERR $char . "\n";
+        #ReadMode('normal');
+        my $saved;
         switch ($char)
         {
             case "b" { last OUTER; }
@@ -272,19 +359,23 @@ OUTER: while (1)
             }
             case 'S'
             {
-                $current->{series} = get_integer( "Series", $current->{series} );
-                print STDERR $current->{series};
+                $saved = $current->{series};
+                $current->{series} = get_input( "Series", 1, $saved );
+                status("Series changed from $saved to $current->{series} ");
+
             }
 
             case 'E'
             {
-                $current->{episode} = get_integer( "Episode", $current->{episode} + 1 );
+                $saved = $current->{episode};
+                $current->{episode} = get_input( "Episode", 1, $saved + 1 );
+                status("Series changed from $saved to $current->{episode} ");
                 $current->{section} = 0;
             }
             case 'f' { last OUTER; }
             case 's'
             {
-                $current->{section} = get_integer( "section", $current->{section} + 1 );
+                $current->{section} = get_input( "section", 1, $current->{section} + 1 );
                 $start_time         = "00:00:00.000";
                 $end_time           = $video_length;
             INNER: while (1)
