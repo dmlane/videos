@@ -4,7 +4,7 @@ use Pod::Usage;
 use DBI;
 use MP4::Info;
 use Getopt::Std;
-use Term::Menus;
+#use Term::Menus;
 use File::Basename;
 use Term::ReadKey;
 use feature 'switch';
@@ -213,7 +213,7 @@ sub fetch_new_files {
 sub get_timestamp {
     my ( $prompt, $default ) = @_;
     my $value = "";
-    const my $ctrlC_value => "#ControlC#";
+    const our $ctrlC_value => "#ControlC#";
 
     sub ctrl_c {
         $SIG{INT} = \&ctrl_c;
@@ -256,17 +256,17 @@ sub get_program {
 =cut
 
 sub process_file {
-    my ( $previous, $current, $video_length ) = @_;
+    our ( $previous, $current, $video_length ) = @_;
     my $prompt = "";
     my $char;
     my $ichar;
-    my $HI = chr(27) . '[1;33m';
-    my $MD = chr(27) . '[1;36m';
-    my $LO = chr(27) . '[0m';
+    our $HI = chr(27) . '[1;33m';
+    our $MD = chr(27) . '[1;36m';
+    our $LO = chr(27) . '[0m';
     my ( $start_time, $end_time );
-    my $result;
+    our $result;
     my ( $start_new, $end_new );
-    my %delta;
+    our %delta;
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
 
     sub print_changes {
