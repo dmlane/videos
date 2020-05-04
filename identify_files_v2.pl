@@ -54,7 +54,7 @@ sub get_geometry {
 
 sub print_history {
     get_geometry();
-    $scr->at( $geo_hist_top, 0 )->clreos();
+    #$scr->at( $geo_hist_top, 0 )->clreos();
     for ( my $n = $geo_hist_start, my $r = $geo_hist_top; $n < 20; $n++, $r++ ) {
         $scr->at( $r, 0 )->puts( $buff[$n] );
     }
@@ -221,7 +221,6 @@ sub get_timestamp {
     }
     Clipboard->copy("0000000000");
     select()->flush();
-    status($prompt);
     $scr->at( $geo_action1, 0 )
         ->puts("What $prompt [Copy to clipboard or ctrl-c for $default] : $value")->clreol();
     $SIG{INT} = \&ctrl_c;
@@ -236,7 +235,6 @@ sub get_timestamp {
 
     $SIG{INT} = 'DEFAULT';
 
-    status("$prompt >>>$value<<<");
     return $value;
 }
 
@@ -283,24 +281,16 @@ sub process_file {
             }
         }
 
-        #printf STDERR "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
-        #    $delta{program},
-        #    $delta{series}, $delta{episode}, $delta{section};
-        return sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
+        
+        $result= sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
             $delta{program},
             $delta{series}, $delta{episode}, $delta{section};
+        return $result;
     }
 OUTER: while (1) {
         $char = prompt_char( print_changes() );
 
-        #ReadMode('cbreak');
-        #
-        ##printf STDERR "===========\n${prompt}\n";
-        ##printf STDERR "What next? (section, file, Episode, Series, Program, Quit): \n";
-        #
-        #$char = ReadKey(0);
-        #printf STDERR $char . "\n";
-        #ReadMode('normal');
+        
         my $saved;
         given ($char) {
             when (/[bB]/) { last OUTER; }
