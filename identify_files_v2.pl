@@ -15,8 +15,8 @@ use Term::Screen;
 no warnings 'experimental::smartmatch';
 
 #=========================================================================#
-const my $ReserveLines = 4;
-const my $HistorySize  = 20;
+const my $ReserveLines => 4;
+const my $HistorySize  => 20;
 
 # Defines where we pick up the new videos (may be overridden by command line option)
 my $dir = "/System/Volumes/Data/Unix/Videos/Import";
@@ -99,40 +99,8 @@ sub prompt_char {
     print_history();
     my $bot_left = $scr->rows() - 2;
 
-    #my $rc=$scr->rows();
-    #my ($first_sub,$top_left,$bot_left);
-    #if ($rc < 24) {
-    #    $first_sub=24-$rc;
-    #    $top_left=0;
-    #
-    #}
-    #else
-    #{
-    #    $first_sub=0;
-    #    $top_left=$rc-24;
-    #}
-    #$bot_left=$rc-2;
-    #$scr->at($top_left,0)->clreos();
-    #for (my $n=$first_sub,my $r=$top_left;$n<20;$n++,$r++)
-    #{
-    #    $scr->at($r,0)->puts($buff[$n]);
-    #}
-    #$scr->at($bot_left,0)->puts($p);
-    #my $c=$scr->getch();
-    $scr->at( $bot_left, 0 )->puts($full_prompt)->clreol();
     return $scr->getch();
 }
-
-#sub print_history
-#{
-#    my $y = $scr->rows() - @buff - 2;
-#    foreach (@buff)
-#    {
-#        $scr->at( $y, 0 );
-#        printf "$_";
-#    }
-#
-#}
 
 sub connect_db {
     $dbh = DBI->connect( $dsn, $userid, $password, { RaiseError => 1 } )
@@ -245,13 +213,7 @@ sub fetch_new_files {
 sub get_timestamp {
     my ( $prompt, $default ) = @_;
     my $value = "";
-    const my $ctrlC_value = "#ControlC#";
-
-    sub show_prompt {
-        $scr->at( $geo_action1, 0 )
-            ->puts("What $prompt [Copy to clipboard or ctrl-c for $default] : $value")->clreol();
-
-    }
+    const my $ctrlC_value => "#ControlC#";
 
     sub ctrl_c {
         $SIG{INT} = \&ctrl_c;
@@ -259,7 +221,9 @@ sub get_timestamp {
     }
     Clipboard->copy("0000000000");
     select()->flush();
-    show_prompt();
+    status($prompt);
+    $scr->at( $geo_action1, 0 )
+        ->puts("What $prompt [Copy to clipboard or ctrl-c for $default] : $value")->clreol();
     $SIG{INT} = \&ctrl_c;
     until ( $value =~ /^\d\d:\d\d:\d\d\.\d\d\d/ ) {
         sleep(1);
@@ -267,10 +231,12 @@ sub get_timestamp {
         $value = $default if $value eq $ctrlC_value;
     }
     chomp $value;
-    show_prompt();
+    $scr->at( $geo_action1, 0 )
+        ->puts("What $prompt [Copy to clipboard or ctrl-c for $default] : $value")->clreol();
 
     $SIG{INT} = 'DEFAULT';
 
+    status("$prompt >>>$value<<<");
     return $value;
 }
 
@@ -416,15 +382,6 @@ sub process_new_files {
         }
 
     }
-
-    #foreach my $file ( @{$all_new} )
-    #{
-    #    $current_value{file} = $file->{name};
-    #
-    #    #$action=get_action($file,$program,$episode,$section);
-    #    process_file( \%previous_value, \%current_value, $file->{video_length} );
-    #
-    #}
 }
 
 =head2  init
