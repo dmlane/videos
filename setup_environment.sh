@@ -3,6 +3,7 @@
 perl_dependencies="
 DBI
 Clipboard
+TAP::Harness::Env
 Const::Fast
 File::Basename
 MP4::Info 

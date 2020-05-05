@@ -4,6 +4,7 @@ use Pod::Usage;
 use DBI;
 use MP4::Info;
 use Getopt::Std;
+
 #use Term::Menus;
 use File::Basename;
 use Term::ReadKey;
@@ -21,7 +22,8 @@ const my $HistorySize  => 20;
 # Defines where we pick up the new videos (may be overridden by command line option)
 my $dir = "/System/Volumes/Data";
 $dir = "/Diskstation" if $^O eq "linux";
-$dir=$dir . "Unix/Videos/Import";
+$dir = $dir . "Unix/Videos/Import";
+
 # bits for  for database access
 my $database = $ENV{"HOME"} . "/data/videos.db";
 my $dsn      = "DBI:SQLite:dbname=$database";
@@ -55,6 +57,7 @@ sub get_geometry {
 
 sub print_history {
     get_geometry();
+
     #$scr->at( $geo_hist_top, 0 )->clreos();
     for ( my $n = $geo_hist_start, my $r = $geo_hist_top; $n < 20; $n++, $r++ ) {
         $scr->at( $r, 0 )->puts( $buff[$n] );
@@ -135,11 +138,11 @@ Retrieve the last 8 sections processed from database
 
 sub get_last8_sections {
     my $q_get_last8 = qq(
-	select * from 
-	   (select program_name,series_number,episode_number,section_number,last_updated,file_name
-	       from videos order by last_updated desc limit 8)
-	   order by last_updated asc;
-	);
+    select * from 
+       (select program_name,series_number,episode_number,section_number,last_updated,file_name
+           from videos order by last_updated desc limit 8)
+       order by last_updated asc;
+    );
     #
     return ( db_fetch $q_get_last8);
 }
@@ -192,8 +195,8 @@ sub fetch_new_files {
             ( $k1, $k2 ) = ( $sfn =~ /^(.*)_(\d+)\..*$/ );
         }
         $stmt = qq(insert or ignore into raw_file (name,k1,k2,video_length,last_updated,status)
-	  					values('$sfn','$k1',$k2,strftime('%H:%M:%f','$video_length'),
-								datetime($epoch_timestamp,'unixepoch','localtime'),0));
+                          values('$sfn','$k1',$k2,strftime('%H:%M:%f','$video_length'),
+                                datetime($epoch_timestamp,'unixepoch','localtime'),0));
         $rv = $dbh->do($stmt) or die $DBI::errstr;
     }
 
@@ -202,10 +205,10 @@ sub fetch_new_files {
     # Get records into an array
     $result = db_fetch(
         qq(
-		select name,video_length,last_updated from  raw_file
-		            where status=0
-		      order by k1,k2;
-			  )
+        select name,video_length,last_updated from  raw_file
+                    where status=0
+              order by k1,k2;
+              )
     );
     status( sprintf "There are now %d new files to process", scalar @{$result} );
     return $result;
@@ -282,8 +285,7 @@ sub process_file {
             }
         }
 
-        
-        $result= sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
+        $result = sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
             $delta{program},
             $delta{series}, $delta{episode}, $delta{section};
         return $result;
@@ -291,7 +293,6 @@ sub process_file {
 OUTER: while (1) {
         $char = prompt_char( print_changes() );
 
-        
         my $saved;
         given ($char) {
             when (/[bB]/) { last OUTER; }
