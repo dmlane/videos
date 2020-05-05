@@ -19,8 +19,9 @@ const my $ReserveLines => 4;
 const my $HistorySize  => 20;
 
 # Defines where we pick up the new videos (may be overridden by command line option)
-my $dir = "/System/Volumes/Data/Unix/Videos/Import";
-
+my $dir = "/System/Volumes/Data";
+$dir = "/Diskstation" if $^O eq "linux";
+$dir=$dir . "Unix/Videos/Import";
 # bits for  for database access
 my $database = $ENV{"HOME"} . "/data/videos.db";
 my $dsn      = "DBI:SQLite:dbname=$database";

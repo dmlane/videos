@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PERL5LIB="/System/Volumes/Data/Applications/Komodo IDE 12.app/Contents/SharedSupport/dbgp/perllib:$PERL5LIB"
+export PERL5LIB="${HOME}/Komodo.debug/perllib"
 export PERLDB_OPTS="RemotePort=127.0.0.1:9000"
 export DBGP_IDEKEY="dave"
 
