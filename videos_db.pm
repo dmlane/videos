@@ -91,11 +91,11 @@ sub db_add_section {
     my $already_exists = 0;
 
     #my %rec = @{$current};
-    print $current->{file_name} . "\n";
+    print $current->{file} . "\n";
 
     #-> file must exist in raw_files
     connect_db();
-    $stmt = qq(select count(*) count from raw_file where name="$current->{file_name}");
+    $stmt = qq(select count(*) count from raw_file where name="$current->{file}");
     my $sth = $dbh->prepare($stmt);
     $sth->execute();
     my $rec = $sth->fetchall_arrayref( {} );
@@ -104,7 +104,7 @@ sub db_add_section {
     # File exists so check if section exists
 
     $stmt
-        = qq(select * from videos where file_name="$current->{file_name}" and section_number=$current->{section_number};);
+        = qq(select * from videos where file_name="$current->{file}" and section_number=$current->{section};);
     $sth = $dbh->prepare($stmt);
     $sth->execute();
     my $existing_section = $sth->fetchall_arrayref( {} );
@@ -123,33 +123,33 @@ sub db_add_section {
         if ($already_exists) {
            
             $stmt = qq(delete from section where id in (
-                    select section_id from videos where file_name="$current->{file_name}"
-                    and section_number=$current->{section_number}
+                    select section_id from videos where file_name="$current->{file}"
+                    and section_number=$current->{section}
                     ));
             $dbh->do($stmt);
         }
 
-        $stmt = qq(insert or ignore into program (name) values ("$current->{program_name}" ));
+        $stmt = qq(insert or ignore into program (name) values ("$current->{program}" ));
         $dbh->do($stmt);
 
         $stmt
-            = qq(insert or ignore into series (series_number,program_id) values ("$current->{series_number}",
-            (select id from program where name="$current->{program_name}")));
+            = qq(insert or ignore into series (series_number,program_id) values ("$current->{series}",
+            (select id from program where name="$current->{program}")));
         $dbh->do($stmt);
 
         $stmt = qq(insert or ignore into episode(episode_number,series_id) values (
-        $current->{episode_number},
-        (select series_id from videos where program_name="$current->{program_name}"
-        and series_number=$current->{series_number})));
+        $current->{episode},
+        (select series_id from videos where program_name="$current->{program}"
+        and series_number=$current->{series})));
         $dbh->do($stmt);
 
         $stmt
             = qq(insert into section(section_number,episode_id,start_time,end_time,raw_file_id,status)
-                    values ($current->{section_number},
-                    (select episode_id from videos where program_name="$current->{program_name}"
-        and series_number=$current->{series_number} and episode_number=$current->{episode_number}),
+                    values ($current->{section},
+                    (select episode_id from videos where program_name="$current->{program}"
+        and series_number=$current->{series} and episode_number=$current->{episode}),
         strftime('%H:%M:%f',"$start_time"),strftime('%H:%M:%f',"$end_time")
-        ,(select id from raw_file where name="$current->{file_name}"),0
+        ,(select id from raw_file where name="$current->{file}"),0
         ));
         $dbh->do($stmt);
 

@@ -113,7 +113,7 @@ sub save_results {
     my $ichar;
     my $prompt;
 
-    if ( dbadd_section( $current, $start_time, $end_time, 0 ) == 1 ) {
+    if ( db_add_section( $current, $start_time, $end_time, 0 ) == 1 ) {
         while (1) {
 
             $prompt
@@ -122,7 +122,7 @@ sub save_results {
                 $current->{series}, $current->{episode}, $current->{section};
             $ichar = prompt_char("$prompt");
             if ( $ichar =~ "[yY]" ) {
-                dbadd_section( $current, $start_time, $end_time, 1 );
+                db_add_section( $current, $start_time, $end_time, 1 );
                 last;
             }
             if ( $ichar =~ "[nN]" ) {
@@ -235,7 +235,7 @@ sub process_file {
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
     my $fn = $dir . "/" . $current->{file};
     $procfile = $pdir . "/" . $current->{file};
-    system("ln -s $fn $procfile") == 0 or die "Cannot ln $fn to $procfile";
+    system("ln $fn $procfile") == 0 or die "Cannot ln $fn to $procfile";
 
     sub format_changes {
         %delta = %{$current};
@@ -359,7 +359,10 @@ sub init {
     getopts( "d:", \%opts );
     die pod2usage( verbose => 1 ) if $ARGV[0];
     $dir = $opts{'d'} if exists $opts{'d'};
-
+    for my $fn (<$pdir/V*.mp4>) {
+		status("Found file from last run ($fn) - removing it");
+        unlink $fn or die "Cannot rm $fn";
+}
 }
 
 sub main {
