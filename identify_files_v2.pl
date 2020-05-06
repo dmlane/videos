@@ -102,7 +102,7 @@ sub prompt_char {
     my ($full_prompt) = @_;
     print_history();
     my $bot_left = $scr->rows() - 2;
-
+    $scr->at( $geo_action1, 0 )->puts($full_prompt)->clreol();
     return $scr->getch();
 }
 
@@ -159,10 +159,21 @@ sub get_last_values {
 }
 
 =head2 save_results
+Put new entry in database *or* replace existing entry
 =cut
 
 sub save_results {
+    my ( $current, $start_time, $end_time ) = @_;
+    my $exists = db_fetch qq(
+        select count(*) from videos
+            where program_name='$current->{program}
+            and series_number =$current->{series}
+            and episode_number =$current->{episode}
+            and section_number=$current->{section}
+            )
+        ;
 
+    return 0;
 }
 
 =head2 fetch_new_files
@@ -171,8 +182,8 @@ already present in raw_file (as it means they have already been partially or ful
 =cut
 
 sub fetch_new_files {
-    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv, $result,
-        $k1, $k2 );
+    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv,
+        $result, $k1, $k2 );
     status("Looking for new files to process");
 
     #Get a list of all files in $dir which haven't already been processed
@@ -273,7 +284,7 @@ sub process_file {
     our %delta;
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
 
-    sub print_changes {
+    sub format_changes {
         %delta = %{$current};
         foreach my $key ( keys %{$current} ) {
             if ( $current->{$key} eq $previous->{$key} ) {
@@ -291,7 +302,7 @@ sub process_file {
         return $result;
     }
 OUTER: while (1) {
-        $char = prompt_char( print_changes() );
+        $char = prompt_char( format_changes() );
 
         my $saved;
         given ($char) {
@@ -326,6 +337,7 @@ OUTER: while (1) {
                     save_results( $current, $start_new, $end_new );
                     $start_time = $start_new;
                     $end_time   = $end_new;
+
                 }
             }
             when (/[qQ]/) {
