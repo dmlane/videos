@@ -13,24 +13,21 @@ use Clipboard;
 use Const::Fast;
 use Carp qw( croak );
 use Term::Screen;
+use videos_db;
 no warnings 'experimental::smartmatch';
 
 #=========================================================================#
 const my $ReserveLines => 4;
 const my $HistorySize  => 20;
+const our $ctrlC_value => "#ControlC#";
 
 # Defines where we pick up the new videos (may be overridden by command line option)
 my $dir = "/System/Volumes/Data";
 $dir = "/Diskstation" if $^O eq "linux";
 $dir = $dir . "/Unix/Videos/Import";
-
-# bits for  for database access
-my $database = $ENV{"HOME"} . "/data/videos.db";
-my $dsn      = "DBI:SQLite:dbname=$database";
-my $userid   = "";
-my $password = "";
-my $dbh;
-my $scr = Term::Screen->new() or die "Cannot run Term::Screen->new";
+my $pdir     = $dir . "/processing";
+my $procfile = "#";
+my $scr      = Term::Screen->new() or die "Cannot run Term::Screen->new";
 $scr->clrscr();
 
 my @buff = ("123") x $HistorySize;
@@ -106,74 +103,35 @@ sub prompt_char {
     return $scr->getch();
 }
 
-sub connect_db {
-    $dbh = DBI->connect( $dsn, $userid, $password, { RaiseError => 1 } )
-        or die $DBI::errstr;
-}
-
-sub close_db {
-    $dbh->disconnect();
-}
-
-#=========================================================================#
-
-=head2 db_fetch
-Fetch the results of the select provided into a hash array
-=cut
-
-sub db_fetch {
-    my ($stmt) = @_;
-    my $results;
-    connect_db();
-    my $sth = $dbh->prepare($stmt);
-    $sth->execute();
-    $results = $sth->fetchall_arrayref( {} );
-    close_db();
-    return $results;
-}
-
-=head2  get_last8
-Retrieve the last 8 sections processed from database
-=cut
-
-sub get_last8_sections {
-    my $q_get_last8 = qq(
-    select * from 
-       (select program_name,series_number,episode_number,section_number,last_updated,file_name
-           from videos order by last_updated desc limit 8)
-       order by last_updated asc;
-    );
-    #
-    return ( db_fetch $q_get_last8);
-}
-
-=head2 get_last_values
-=cut
-
-sub get_last_values {
-    return db_fetch(
-        qq(
-                        select program_name,series_number,episode_number,section_number from
-                        videos where raw_status = 1 order by k1,k2 desc limit 1 )
-    );
-}
-
 =head2 save_results
 Put new entry in database *or* replace existing entry
 =cut
 
 sub save_results {
     my ( $current, $start_time, $end_time ) = @_;
-    my $exists = db_fetch qq(
-        select count(*) from videos
-            where program_name='$current->{program}
-            and series_number =$current->{series}
-            and episode_number =$current->{episode}
-            and section_number=$current->{section}
-            )
-        ;
+    my $exists = 0;
+    my $ichar;
+    my $prompt;
 
-    return 0;
+    if ( dbadd_section( $current, $start_time, $end_time, 0 ) == 1 ) {
+        while (1) {
+
+            $prompt
+                = sprintf "Program %s Series %s Episode %s Section %s already exists - replace?",
+                $current->{program},
+                $current->{series}, $current->{episode}, $current->{section};
+            $ichar = prompt_char("$prompt");
+            if ( $ichar =~ "[yY]" ) {
+                dbadd_section( $current, $start_time, $end_time, 1 );
+                last;
+            }
+            if ( $ichar =~ "[nN]" ) {
+                return (1);
+            }
+        }
+
+        return 0;
+    }
 }
 
 =head2 fetch_new_files
@@ -205,22 +163,15 @@ sub fetch_new_files {
 
             ( $k1, $k2 ) = ( $sfn =~ /^(.*)_(\d+)\..*$/ );
         }
-        $stmt = qq(insert or ignore into raw_file (name,k1,k2,video_length,last_updated,status)
-                          values('$sfn','$k1',$k2,strftime('%H:%M:%f','$video_length'),
-                                datetime($epoch_timestamp,'unixepoch','localtime'),0));
-        $rv = $dbh->do($stmt) or die $DBI::errstr;
+        db_add_new_file( $sfn, $k1, $k2, $video_length, $epoch_timestamp );
+
     }
 
     close_db();
 
     # Get records into an array
-    $result = db_fetch(
-        qq(
-        select name,video_length,last_updated from  raw_file
-                    where status=0
-              order by k1,k2;
-              )
-    );
+    $result = db_fetch_new_files();
+
     status( sprintf "There are now %d new files to process", scalar @{$result} );
     return $result;
 }
@@ -228,7 +179,6 @@ sub fetch_new_files {
 sub get_timestamp {
     my ( $prompt, $default ) = @_;
     my $value = "";
-    const our $ctrlC_value => "#ControlC#";
 
     sub ctrl_c {
         $SIG{INT} = \&ctrl_c;
@@ -283,6 +233,9 @@ sub process_file {
     my ( $start_new, $end_new );
     our %delta;
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
+    my $fn = $dir . "/" . $current->{file};
+    $procfile = $pdir . "/" . $current->{file};
+    system("ln -s $fn $procfile") == 0 or die "Cannot ln $fn to $procfile";
 
     sub format_changes {
         %delta = %{$current};
@@ -334,20 +287,29 @@ OUTER: while (1) {
                     last INNER if $ichar =~ "[yYbB]";
                 }
                 if ( $ichar =~ "[yY]" ) {
-                    save_results( $current, $start_new, $end_new );
-                    $start_time = $start_new;
-                    $end_time   = $end_new;
+                    if ( save_results( $current, $start_new, $end_new ) == 0 ) {
+
+                        $start_time = $start_new;
+                        $end_time   = $end_new;
+                        status("Section created");
+                    }
+                    else {
+                        status("Section not created!");
+                    }
 
                 }
             }
             when (/[qQ]/) {
 
-                #unlink $proc_file or die "Cannot rm $proc_file";
+                unlink $procfile or die "Cannot rm $procfile";
+                $procfile = "#;";
                 exit(0);
             }
 
         }
     }
+    unlink $procfile or die "Cannot rm $procfile";
+    $procfile = "#";
     return 1 if ( $char =~ "[bB]" );    # Go back to previous file
     return 0;
 }
