@@ -30,7 +30,42 @@ my $procfile = "#";
 my $scr      = Term::Screen->new() or die "Cannot run Term::Screen->new";
 $scr->clrscr();
 
-my @buff = ("123") x $HistorySize;
+my @buff = ("...") x $HistorySize;
+
+sub push_buffer {
+    my ($new_rec) = @_;
+    my $n = 0;
+    for ( my $m = 1; $m <= $HistorySize; $m++ ) {
+        $buff[ $n++ ] = $buff[$m];
+    }
+    $buff[ $HistorySize - 1 ] = $new_rec;
+}
+
+sub fill_buff {
+    my $last20       = get_last20_sections();
+    my $last_element = $#{$last20};
+    my $element;
+    if ( $last_element < 0 ) {
+        $element
+            = { program_name => "", series_number => 1, episode_number => 1, section_number => 0 };
+        return $element;
+    }
+    for ( my $n = 0; $n <= $last_element; $n++ ) {
+        $element = scalar @{$last20}[$n];
+        push_buffer(
+            sprintf(
+                "%s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
+                $element->{file_name},     $element->{start_time},
+                $element->{end_time},      $element->{program_name},
+                $element->{series_number}, $element->{episode_number},
+                $element->{section_number}
+            )
+        );
+    }
+
+    return @{$last20}[$last_element];
+
+}
 
 our ( $geo_hist_top, $geo_hist_start, $geo_seperator, $geo_action1, $geo_action2, $geo_status );
 
@@ -121,17 +156,18 @@ sub save_results {
                 $current->{program},
                 $current->{series}, $current->{episode}, $current->{section};
             $ichar = prompt_char("$prompt");
-            if ( $ichar =~ "[yY]" ) {
-                db_add_section( $current, $start_time, $end_time, 1 );
-                last;
-            }
-            if ( $ichar =~ "[nN]" ) {
-                return (1);
-            }
+            last if ( $ichar =~ "[yYnN]" );
+        }
+        if ( $ichar =~ "[nN]" ) {
+            return (1);
         }
 
-        return 0;
+        die "Cannot insert section on 2nd attempt"
+            if db_add_section( $current, $start_time, $end_time, 1 ) == 1;
+
     }
+    my $ignore = fill_buffer();
+    return 0;
 }
 
 =head2 fetch_new_files
@@ -277,6 +313,10 @@ OUTER: while (1) {
             }
             when ('f') { last OUTER; }
             when ('s') {
+                if ( $current->{program} eq "" ) {
+                    status("You must define Program first");
+                    next OUTER;
+                }
                 $current->{section} = get_input( "section", 1, $current->{section} + 1 );
                 $start_time         = "00:00:00.000";
                 $end_time           = $video_length;
@@ -318,6 +358,8 @@ OUTER: while (1) {
 =cut
 
 sub process_new_files {
+    my ( $last_state, $all_new ) = @_;
+
     my %previous_value = ( file => "", program => "", series => 1, episode => 1, section => 0 );
     my %current_value  = ( file => "", program => "", series => 1, episode => 1, section => 0 );
 
@@ -325,16 +367,13 @@ sub process_new_files {
     my $file_sub;
     my $file;
 
-    my ( $program, $series, $episode, $section ) = ( "", 1, 1, 0 );
-    my ($all_new) = @_;
-    my $action;
-    my $last_values = get_last_values();
-    if ( @{$last_values} ) {
-        (   $current_value{program}, $current_value{series},
-            $current_value{episode}, $current_value{section}
-        ) = get_last_values();
-    }
-    $file_sub = 0;
+    #my ( $program, $series, $episode, $section ) = ( "", 1, 1, 0 );
+    #my $action;
+    $current_value{program} = $last_state->{program_name};
+    $current_value{series}  = $last_state->{series_number};
+    $current_value{episode} = $last_state->{episode_number};
+    $current_value{section} = $last_state->{section_number};
+    $file_sub               = 0;
     while ( $file_sub < @{$all_new} ) {
         $file = @{$all_new}[$file_sub];
         $current_value{file} = $file->{name};
@@ -360,9 +399,9 @@ sub init {
     die pod2usage( verbose => 1 ) if $ARGV[0];
     $dir = $opts{'d'} if exists $opts{'d'};
     for my $fn (<$pdir/V*.mp4>) {
-		status("Found file from last run ($fn) - removing it");
+        status("Found file from last run ($fn) - removing it");
         unlink $fn or die "Cannot rm $fn";
-}
+    }
 }
 
 sub main {
@@ -371,11 +410,12 @@ sub main {
     init();
 
     # Get last 8 sections of video processed
-    #our $last8_sections = get_last8_sections();
 
     # Put a list of new mp4 files on filesystem into table new_files
     my $all_new = fetch_new_files();
-    process_new_files($all_new);
+
+    my $current_rec = fill_buff();
+    process_new_files( $current_rec, $all_new );
 
 }
 

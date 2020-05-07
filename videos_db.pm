@@ -1,7 +1,7 @@
 use strict;
 
 use Pod::Usage;
-use DBI;
+use DBD::SQLite;
 use feature 'switch';
 use Const::Fast;
 use Try::Tiny;
@@ -15,12 +15,21 @@ my $userid   = "";
 my $password = "";
 
 sub connect_db {
-    $dbh = DBI->connect( $dsn, $userid, $password, { RaiseError => 1 } )
+    $dbh = DBI->connect( $dsn, $userid, $password, {  RaiseError => 1 } )
         or die $DBI::errstr;
+        $dbh->do("PRAGMA foreign_keys = ON");
 }
 
 sub close_db {
     $dbh->disconnect();
+}
+
+sub db_exec {
+    my ($stmt) = @_;
+     connect_db();
+    my $sth = $dbh->prepare($stmt);
+    $sth->execute();
+    close_db();
 }
 
 #=========================================================================#
@@ -63,15 +72,17 @@ sub db_add_new_file {
 Retrieve the last 8 sections processed from database
 =cut
 
-sub get_last8_sections {
-    my $q_get_last8 = qq(
+sub get_last20_sections {
+    
+    my $last20_sections = qq(
     select * from 
-       (select program_name,series_number,episode_number,section_number,last_updated,file_name
-           from videos order by last_updated desc limit 8)
+       (select program_name,series_number,episode_number,section_number,last_updated,file_name,
+        start_time,end_time
+           from videos order by last_updated desc limit 20)
        order by last_updated asc;
     );
     #
-    return ( db_fetch $q_get_last8);
+    return ( db_fetch $last20_sections);
 }
 
 sub db_fetch_new_files {
