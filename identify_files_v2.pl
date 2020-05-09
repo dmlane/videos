@@ -13,6 +13,8 @@ use Clipboard;
 use Const::Fast;
 use Carp qw( croak );
 use Term::Screen;
+use lib dirname(__FILE__);
+use VidScreen;
 use videos_db;
 no warnings 'experimental::smartmatch';
 
@@ -30,16 +32,8 @@ my $procfile = "#";
 my $scr      = Term::Screen->new() or die "Cannot run Term::Screen->new";
 $scr->clrscr();
 
-my @buff = ("...") x $HistorySize;
-
-sub push_buffer {
-    my ($new_rec) = @_;
-    my $n = 0;
-    for ( my $m = 1; $m <= $HistorySize; $m++ ) {
-        $buff[ $n++ ] = $buff[$m];
-    }
-    $buff[ $HistorySize - 1 ] = $new_rec;
-}
+my @buff   = ("...") x $HistorySize;
+my $screen = new VidScreen;
 
 sub fill_buff {
     my $last20       = get_last20_sections();
@@ -52,7 +46,7 @@ sub fill_buff {
     }
     for ( my $n = 0; $n <= $last_element; $n++ ) {
         $element = scalar @{$last20}[$n];
-        push_buffer(
+        $screen->scroll_top(
             sprintf(
                 "%s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
                 $element->{file_name},     $element->{start_time},
@@ -65,77 +59,6 @@ sub fill_buff {
 
     return @{$last20}[$last_element];
 
-}
-
-our ( $geo_hist_top, $geo_hist_start, $geo_seperator, $geo_action1, $geo_action2, $geo_status );
-
-sub get_geometry {
-    my $r           = $scr->rows();
-    my $total_lines = $ReserveLines + $HistorySize;
-    if ( $total_lines >= $r ) {
-        $geo_hist_top   = 0;
-        $geo_hist_start = $total_lines - $r;
-    }
-    else {
-        $geo_hist_top   = $r - $total_lines;
-        $geo_hist_start = 0;
-    }
-
-    $geo_seperator = $r - $ReserveLines;
-    $geo_action1   = $geo_seperator + 1;
-    $geo_action2   = $geo_seperator + 2;
-    $geo_status    = $geo_seperator + 3;
-}
-
-sub print_history {
-    get_geometry();
-
-    #$scr->at( $geo_hist_top, 0 )->clreos();
-    for ( my $n = $geo_hist_start, my $r = $geo_hist_top; $n < 20; $n++, $r++ ) {
-        $scr->at( $r, 0 )->puts( $buff[$n] );
-    }
-}
-
-sub get_input {
-    my ( $prompt, $numeric, $default ) = @_;
-    my $string = "";
-    my $c;
-
-    my $full_prompt = "$prompt [${default}]: ";
-    print_history();
-
-    while () {
-        $scr->at( $geo_action1, 0 )->puts($full_prompt)->clreol()->reverse()->puts($string)
-            ->normal();
-        $c = $scr->noecho()->getch();
-        my $o = ord($c);
-        if ( $o == 127 )    # This should be backspace
-        {
-            $string = substr( $string, 0, -1 ) if length( $string > 0 );
-            next;
-        }
-        last if $c =~ /\r/;
-        if ( $c =~ /\d/ or $numeric == 0 ) {
-            $string = $string . $c;
-        }
-    }
-    return $default if length($string) == 0;
-    return $string;
-
-}
-
-sub status {
-    my ($p) = @_;
-    get_geometry();
-    $scr->at( $geo_status, 0 )->clreol()->puts($p);
-}
-
-sub prompt_char {
-    my ($full_prompt) = @_;
-    print_history();
-    my $bot_left = $scr->rows() - 2;
-    $scr->at( $geo_action1, 0 )->puts($full_prompt)->clreol();
-    return $scr->getch();
 }
 
 =head2 save_results
@@ -155,7 +78,7 @@ sub save_results {
                 = sprintf "Program %s Series %s Episode %s Section %s already exists - replace?",
                 $current->{program},
                 $current->{series}, $current->{episode}, $current->{section};
-            $ichar = prompt_char("$prompt");
+            $ichar = $screen->get_char("$prompt");
             last if ( $ichar =~ "[yYnN]" );
         }
         if ( $ichar =~ "[nN]" ) {
@@ -178,7 +101,7 @@ already present in raw_file (as it means they have already been partially or ful
 sub fetch_new_files {
     my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv,
         $result, $k1, $k2 );
-    status("Looking for new files to process");
+    $screen->print_status("Looking for new files to process");
 
     #Get a list of all files in $dir which haven't already been processed
     connect_db();
@@ -208,35 +131,8 @@ sub fetch_new_files {
     # Get records into an array
     $result = db_fetch_new_files();
 
-    status( sprintf "There are now %d new files to process", scalar @{$result} );
+    $screen->print_status( sprintf "There are now %d new files to process", scalar @{$result} );
     return $result;
-}
-
-sub get_timestamp {
-    my ( $prompt, $default ) = @_;
-    my $value = "";
-
-    sub ctrl_c {
-        $SIG{INT} = \&ctrl_c;
-        Clipboard->copy($ctrlC_value);
-    }
-    Clipboard->copy("0000000000");
-    select()->flush();
-    $scr->at( $geo_action1, 0 )
-        ->puts("What $prompt [Copy to clipboard or ctrl-c for $default] : $value")->clreol();
-    $SIG{INT} = \&ctrl_c;
-    until ( $value =~ /^\d\d:\d\d:\d\d\.\d\d\d/ ) {
-        sleep(1);
-        $value = Clipboard->paste;
-        $value = $default if $value eq $ctrlC_value;
-    }
-    chomp $value;
-    $scr->at( $geo_action1, 0 )
-        ->puts("What $prompt [Copy to clipboard or ctrl-c for $default] : $value")->clreol();
-
-    $SIG{INT} = 'DEFAULT';
-
-    return $value;
 }
 
 sub get_program {
@@ -244,11 +140,11 @@ sub get_program {
     my $value;
 
     #printf STDERR "What is the program name [$default]";
-    $value = get_input( "What is the program name", 0, $default );
+    $value = $screen->get_string( "What is the program name", $default );
 
     #$value = <STDIN>;
     chomp $value;
-    status("Program changed from $default to $value");
+    $screen->print_status("Program changed from $default to $value");
     return $default if ( length($value) < 1 );
     return ($value);
 }
@@ -291,7 +187,7 @@ sub process_file {
         return $result;
     }
 OUTER: while (1) {
-        $char = prompt_char( format_changes() );
+        $char = $screen->get_char( format_changes() );
 
         my $saved;
         given ($char) {
@@ -314,16 +210,16 @@ OUTER: while (1) {
             when ('f') { last OUTER; }
             when ('s') {
                 if ( $current->{program} eq "" ) {
-                    status("You must define Program first");
+                    $screen->print_status("You must define Program first");
                     next OUTER;
                 }
-                $current->{section} = get_input( "section", 1, $current->{section} + 1 );
+                $current->{section} = $screen->get_number( "section", $current->{section} + 1 );
                 $start_time         = "00:00:00.000";
                 $end_time           = $video_length;
             INNER: while (1) {
-                    $start_new = get_timestamp( "Start time", $start_time );
-                    $end_new   = get_timestamp( "End time",   $end_time );
-                    $ichar     = prompt_char("$start_new -> $end_new     Y=OK (B=Back)?");
+                    $start_new = $screen->get_timestamp( "Start time", $start_time );
+                    $end_new   = $screen->get_timestamp( "End time",   $end_time );
+                    $ichar     = $screen->get_char("$start_new -> $end_new     Y=OK (B=Back)?");
                     last INNER if $ichar =~ "[yYbB]";
                 }
                 if ( $ichar =~ "[yY]" ) {
@@ -331,10 +227,10 @@ OUTER: while (1) {
 
                         $start_time = $start_new;
                         $end_time   = $end_new;
-                        status("Section created");
+                        $screen->print_status("Section created");
                     }
                     else {
-                        status("Section not created!");
+                        $screen->print_status("Section not created!");
                     }
 
                 }
@@ -367,8 +263,6 @@ sub process_new_files {
     my $file_sub;
     my $file;
 
-    #my ( $program, $series, $episode, $section ) = ( "", 1, 1, 0 );
-    #my $action;
     $current_value{program} = $last_state->{program_name};
     $current_value{series}  = $last_state->{series_number};
     $current_value{episode} = $last_state->{episode_number};
@@ -383,9 +277,7 @@ sub process_new_files {
         }
         else {
             $file_sub++;
-
         }
-
     }
 }
 
@@ -399,7 +291,7 @@ sub init {
     die pod2usage( verbose => 1 ) if $ARGV[0];
     $dir = $opts{'d'} if exists $opts{'d'};
     for my $fn (<$pdir/V*.mp4>) {
-        status("Found file from last run ($fn) - removing it");
+        $screen->print_status("Found file from last run ($fn) - removing it");
         unlink $fn or die "Cannot rm $fn";
     }
 }
