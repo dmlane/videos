@@ -31,7 +31,6 @@ my $pdir = $dir . "/processing";
 $dir = "Z:\\Videos\\Import" if $^O eq "MSWin32";
 my $procfile = "#";
 
-my @buff   = ("...") x $HistorySize;
 my $screen = new VidScreen;
 
 sub fill_buff {
