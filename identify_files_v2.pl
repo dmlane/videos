@@ -18,10 +18,12 @@ use VidScreen;
 use videos_db;
 no warnings 'experimental::smartmatch';
 
-#=========================================================================#
-const my $ReserveLines => 4;
-const my $HistorySize  => 20;
-const our $ctrlC_value => "#ControlC#";
+exit
+
+    #=========================================================================#
+    const my $ReserveLines => 4;
+const my $HistorySize      => 20;
+const our $ctrlC_value     => "#ControlC#";
 
 # Defines where we pick up the new videos (may be overridden by command line option)
 my $dir = "/System/Volumes/Data";

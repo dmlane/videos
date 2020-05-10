@@ -1,21 +1,40 @@
 use strict;
 use DBI;
+use feature 'switch';
 
 package VidDB;
 
 sub new {
-    my ( $class, $flavour, $database, $userid, $password ) = @_;
-    my $self = {
+    my ( $class, $database, $login_path ) = @_;
+    my ( $user, $password, $host, $port ) = ("") x 4;
+    open( PARAMS, "my_print_defaults -s ${login_path}|" );
+    while (<PARAMS>) {
+        my ( $key, $value ) = split /=/;
+        given ($key) {
+            when "--user"     { $user     = $value }
+            when "--password" { $password = $value }
+            when "--host"     { $host     = $value }
+            when "--port"     { $port     = $value }
+        }
+    }
+    close(PARAMS);
+    my $dsn =
+
+        my $self = {
+        'dsn'      => "DBI:MariaDB:database=$database;host=$host;port=$port",
+        'user'     => $user,
+        'password' => $password,
         'dbh'      => "",
-        'dsn'      => "DBI:MariaDB:database=videos;mysql_read_default_file=$ENV{'HOME'}/.mylogin.cnf",
-    };
+
+        };
+
     bless $self, $class;
 }
 
 sub db_connect {
     my ($self) = @_;
     $self->{dbh}
-        = DBI->connect( $self->{dsn}, $self->{userid}, $self->{password}, { RaiseError => 1 } )
+        = DBI->connect( $self->{dsn}, $self->{user}, $self->{password}, { RaiseError => 1 } )
         or die $DBI::errstr;
     return;
 }

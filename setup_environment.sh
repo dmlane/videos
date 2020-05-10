@@ -19,8 +19,7 @@ fi
 
 if [ ! -f /usr/local/opt/mysql-client/bin/mysql ] ; then
 	brew install mysql-client 
-	echo 'export PATH="/usr/local/opt/mysql-client/bin:$PATH"'>>~/.bashrc
-	export PATH="/usr/local/opt/mysql-client/bin:$PATH"
+	brew link --force mysql-client
 fi
 
 perldoc -l local::lib
@@ -50,6 +49,12 @@ if [ $? -ne 0 ] ; then
 		exit 1
 	fi
 fi
+install_module Clipboard
+install_module MP4::Info
+install_module Term::ReadKey
+install_module Const::Fast
+install_module Term::Screen
+install_module Perl::Tidy
 
 exit
 	
