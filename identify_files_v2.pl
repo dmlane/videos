@@ -28,6 +28,7 @@ my $dir = "/System/Volumes/Data";
 $dir = "/Diskstation" if $^O eq "linux";
 $dir = $dir . "/Unix/Videos/Import";
 my $pdir     = $dir . "/processing";
+$dir = "Z:\\Videos\\Import" if $^O eq "MSWin32";
 my $procfile = "#";
 my $scr      = Term::Screen->new() or die "Cannot run Term::Screen->new";
 $scr->clrscr();
