@@ -33,8 +33,8 @@ CREATE TABLE raw_file (
 	k1 varchar,
 	k2 integer,
 	video_length datetime,
-	last_updated datetime,
-	status integer
+	last_updated datetime DEFAULT CURRENT_TIMESTAMP,
+	status integer default 0
 );
 
 CREATE TABLE section (
