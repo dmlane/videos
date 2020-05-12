@@ -15,15 +15,16 @@ use Carp qw( croak );
 use Term::Screen;
 use lib dirname(__FILE__);
 use VidScreen;
-use videos_db;
+
+#use VidKomodo;
+use VidDB;
 no warnings 'experimental::smartmatch';
 
-exit
-
-    #=========================================================================#
-    const my $ReserveLines => 4;
-const my $HistorySize      => 20;
-const our $ctrlC_value     => "#ControlC#";
+#=========================================================================#
+const my $ReserveLines => 4;
+const my $HistorySize  => 20;
+const our $ctrlC_value => "#ControlC#";
+const our $logfile     => $ENV{"HOME"} . "/data/videos.log";
 
 # Defines where we pick up the new videos (may be overridden by command line option)
 my $dir = "/System/Volumes/Data";
@@ -33,10 +34,15 @@ my $pdir = $dir . "/processing";
 $dir = "Z:\\Videos\\Import" if $^O eq "MSWin32";
 my $procfile = "#";
 
+#my $screen   = new VidKomodo;
 my $screen = new VidScreen;
+my $db     = new VidDB( "videos", "videos" );
+open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
 
 sub fill_buff {
-    my $last20       = get_last20_sections();
+
+    # **
+    my $last20       = $db->get_last20_sections();
     my $last_element = $#{$last20};
     my $element;
     if ( $last_element < 0 ) {
@@ -56,9 +62,7 @@ sub fill_buff {
             )
         );
     }
-
     return @{$last20}[$last_element];
-
 }
 
 =head2 save_results
@@ -66,14 +70,15 @@ Put new entry in database *or* replace existing entry
 =cut
 
 sub save_results {
+
     my ( $current, $start_time, $end_time ) = @_;
     my $exists = 0;
     my $ichar;
     my $prompt;
+    my $change_in_sections = 1;
 
-    if ( db_add_section( $current, $start_time, $end_time, 0 ) == 1 ) {
+    if ( $db->db_add_section( $current, $start_time, $end_time, 0 ) == 1 ) {
         while (1) {
-
             $prompt
                 = sprintf "Program %s Series %s Episode %s Section %s already exists - replace?",
                 $current->{program},
@@ -84,12 +89,21 @@ sub save_results {
         if ( $ichar =~ "[nN]" ) {
             return (1);
         }
-
         die "Cannot insert section on 2nd attempt"
-            if db_add_section( $current, $start_time, $end_time, 1 ) == 1;
-
+            if $db->db_add_section( $current, $start_time, $end_time, 1 ) == 1;
+        $change_in_sections = 0;
+        printf LOG "%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n", $current->{file}, $start_time, $end_time,
+            $current->{program},
+            $current->{series}, $current->{episode}, $current->{section};
+        $current->{section_count} += $change_in_sections;
     }
-    my $ignore = fill_buffer();
+    $screen->scroll_top(
+        sprintf(
+            "%s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
+            $current->{file},   $start_time,         $end_time, $current->{program},
+            $current->{series}, $current->{episode}, $current->{section}
+        )
+    );
     return 0;
 }
 
@@ -104,8 +118,7 @@ sub fetch_new_files {
     $screen->print_status("Looking for new files to process");
 
     #Get a list of all files in $dir which haven't already been processed
-    connect_db();
-
+    $db->db_connect();
     for $fn (<$dir/V*.mp4>) {
         $info   = get_mp4info($fn);
         $vhours = int( $info->{MM} / 60 );
@@ -119,18 +132,14 @@ sub fetch_new_files {
             $k2 = 0;
         }
         else {
-
             ( $k1, $k2 ) = ( $sfn =~ /^(.*)_(\d+)\..*$/ );
         }
-        db_add_new_file( $sfn, $k1, $k2, $video_length, $epoch_timestamp );
-
+        $db->db_add_new_file( $sfn, $k1, $k2, $video_length, $epoch_timestamp );
     }
-
-    close_db();
+    $db->db_close();
 
     # Get records into an array
-    $result = db_fetch_new_files();
-
+    $result = $db->db_fetch_new_files();
     $screen->print_status( sprintf "There are now %d new files to process", scalar @{$result} );
     return $result;
 }
@@ -153,6 +162,8 @@ sub get_program {
 =cut
 
 sub process_file {
+
+    # **
     our ( $previous, $current, $video_length ) = @_;
     my $prompt = "";
     my $char;
@@ -166,6 +177,7 @@ sub process_file {
     our %delta;
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
     my $fn = $dir . "/" . $current->{file};
+
     $procfile = $pdir . "/" . $current->{file};
     system("ln $fn $procfile") == 0 or die "Cannot ln $fn to $procfile";
 
@@ -180,7 +192,6 @@ sub process_file {
                 $previous->{$key} = $current->{$key};
             }
         }
-
         $result = sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
             $delta{program},
             $delta{series}, $delta{episode}, $delta{section};
@@ -188,7 +199,6 @@ sub process_file {
     }
 OUTER: while (1) {
         $char = $screen->get_char( format_changes() );
-
         my $saved;
         given ($char) {
             when (/[bB]/) { last OUTER; }
@@ -197,14 +207,13 @@ OUTER: while (1) {
             }
             when ('S') {
                 $saved = $current->{series};
-                $current->{series} = get_input( "Series", 1, $saved );
-                status("Series changed from $saved to $current->{series} ");
+                $current->{series} = $screen->get_string( "Series", $saved + 1 );
+                $screen->print_status("Series changed from $saved to $current->{series} ");
             }
-
             when ('E') {
                 $saved = $current->{episode};
-                $current->{episode} = get_input( "Episode", 1, $saved + 1 );
-                status("Series changed from $saved to $current->{episode} ");
+                $current->{episode} = $screen->get_string( "Episode", $saved + 1 );
+                $screen->print_status("Series changed from $saved to $current->{episode} ");
                 $current->{section} = 0;
             }
             when ('f') { last OUTER; }
@@ -224,24 +233,21 @@ OUTER: while (1) {
                 }
                 if ( $ichar =~ "[yY]" ) {
                     if ( save_results( $current, $start_new, $end_new ) == 0 ) {
-
                         $start_time = $start_new;
                         $end_time   = $end_new;
-                        $screen->print_status("Section created");
+                        $screen->print_status(
+                            "Section created (Total for file=$current->section_count");
                     }
                     else {
                         $screen->print_status("Section not created!");
                     }
-
                 }
             }
             when (/[qQ]/) {
-
                 unlink $procfile or die "Cannot rm $procfile";
                 $procfile = "#;";
                 exit(0);
             }
-
         }
     }
     unlink $procfile or die "Cannot rm $procfile";
@@ -254,11 +260,11 @@ OUTER: while (1) {
 =cut
 
 sub process_new_files {
-    my ( $last_state, $all_new ) = @_;
 
+    # **
+    my ( $last_state, $all_new ) = @_;
     my %previous_value = ( file => "", program => "", series => 1, episode => 1, section => 0 );
     my %current_value  = ( file => "", program => "", series => 1, episode => 1, section => 0 );
-
     my $prompt;
     my $file_sub;
     my $file;
@@ -286,6 +292,8 @@ Process parameters and initialize variables
 =cut
 
 sub init {
+
+    # **
     my %opts;
     getopts( "d:", \%opts );
     die pod2usage( verbose => 1 ) if $ARGV[0];
@@ -302,16 +310,13 @@ sub main {
     init();
 
     # Get last 8 sections of video processed
-
     # Put a list of new mp4 files on filesystem into table new_files
-    my $all_new = fetch_new_files();
-
+    my $all_new     = fetch_new_files();
     my $current_rec = fill_buff();
     process_new_files( $current_rec, $all_new );
-
 }
-
 eval { main() };
+close(LOG);
 warn    if $@;
 exit(1) if $@;
 

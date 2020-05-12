@@ -51,8 +51,8 @@ CREATE TABLE section (
   PRIMARY KEY (id), 
   UNIQUE KEY episode_id (episode_id, section_number), 
   KEY raw_file_id (raw_file_id), 
-  CONSTRAINT section_ibfk_1 FOREIGN KEY (raw_file_id) REFERENCES raw_file (id), 
-  CONSTRAINT section_ibfk_2 FOREIGN KEY (episode_id) REFERENCES episode (id)
+  CONSTRAINT section_ibfk_1 FOREIGN KEY (raw_file_id) REFERENCES raw_file (id)  on delete cascade,
+  CONSTRAINT section_ibfk_2 FOREIGN KEY (episode_id) REFERENCES episode (id) on delete cascade
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8 COLLATE = utf8_bin;
 create view videos as 
 select 

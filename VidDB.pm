@@ -1,9 +1,10 @@
 use strict;
-use DBI;
-use feature 'switch';
-no warnings 'experimental::smartmatch';
 
 package VidDB;
+use DBI;
+use Try::Tiny;
+use feature 'switch';
+no warnings 'experimental::smartmatch';
 our $dsn;
 
 sub read_params {
@@ -12,7 +13,7 @@ sub read_params {
     open( PARAMS, "/usr/local/bin/my_print_defaults -s ${login_path}|" );
     while (<PARAMS>) {
         chomp;
-        my ( $key, $value ) = split /=/;
+        my ( $key, $value ) = split /=/, $_, 2;
         given ($key) {
             when ("--user")     { $user     = $value }
             when ("--password") { $password = $value }
@@ -28,10 +29,11 @@ sub new {
     my ( $class, $database, $login_path ) = @_;
     my ( $user, $password, $host, $port ) = read_params($login_path);
     my $self = {
-        'dsn'      => "DBI:MariaDB:database=$database;host=$host;port=$port",
-        'user'     => $user,
-        'password' => $password,
-        'dbh'      => "",
+        'dsn'       => "DBI:MariaDB:database=$database;host=$host;port=$port",
+        'user'      => $user,
+        'password'  => $password,
+        'dbh'       => "",
+        'connected' => 0,
     };
     bless $self, $class;
 }
@@ -41,26 +43,28 @@ sub db_connect {
     $self->{dbh}
         = DBI->connect( $self->{dsn}, $self->{user}, $self->{password}, { RaiseError => 1 } )
         or die $DBI::errstr;
+    $self->{connected} = 1;
     return;
 }
 
 sub db_close {
     my ($self) = @_;
     $self->{dbh}->disconnect();
+    $self->{connected} = 0;
     return;
 }
 
-sub db_set_auto_commit {
+sub db_set_autocommit {
     my ( $self, $value ) = @_;
     $self->{dbh}->{AutoCommit} = $value;
 }
 
 sub db_execute {
     my ( $self, $stmt ) = @_;
-    $self->connect_db();
-    $self->{dbh}->prepare($stmt);
-    $self->{dbh}->execute();
-    $self->db_close();
+    $self->db_connect() if $self->{connected} == 0;
+    my $sth = $self->{dbh}->prepare($stmt);
+    $sth->execute();
+    $self->db_close() if $self->{connected} == 0;
 }
 
 =head2 db_fetch
@@ -70,11 +74,11 @@ Fetch the results of the select provided into a hash array
 sub db_fetch {
     my ( $self, $stmt ) = @_;
     my $results;
-    $self->db_connect();
+    $self->db_connect() if $self->{connected} == 0;
     my $sth = $self->{dbh}->prepare($stmt);
     $sth->execute();
     $results = $sth->fetchall_arrayref( {} );
-    $self->db_close();
+    $self->db_close() if $self->{connected} == 0;
     return $results;
 }
 
@@ -106,11 +110,12 @@ Retrieve the last 8 sections processed from database
 sub get_last20_sections {
     my ($self) = @_;
     my $last20_sections = qq(
-    select * from 
+   select A.* from 
        (select program_name,series_number,episode_number,section_number,last_updated,file_name,
         start_time,end_time
-           from videos order by last_updated desc limit 20)
+           from videos  order by last_updated desc limit 20)  A
        order by last_updated asc;
+    
     );
     #
     return ( $self->db_fetch($last20_sections) );
@@ -137,8 +142,8 @@ sub db_add_section {
     print $current->{file} . "\n";
 
     #-> file must exist in raw_files
-    $self->connect_db();
-    $self->db_set_auto_commit(0);
+    $self->db_connect();
+    $self->db_set_autocommit(0);
     $stmt = qq(select count(*) count from raw_file where name="$current->{file}");
     my $sth = $self->{dbh}->prepare($stmt);
     $sth->execute();
@@ -151,16 +156,19 @@ sub db_add_section {
     $sth = $self->{dbh}->prepare($stmt);
     $sth->execute();
     my $existing_section = $sth->fetchall_arrayref( {} );
-    if ( scalar @{$existing_section} != 0 ) {
+    my $num_results      = scalar @{$existing_section};
+    if ( $num_results != 0 ) {
 
         #Section already exists
         $already_exists = 1;
-        return (1) if ( !$force );
+        if ( !$force ) {
+            $self->{dbh}->rollback();
+            return (1);
+        }
     }
 
     #--> We are allowed to do this
-    #$dbh->{AutoCommit} = 0;
-    #$dbh->{RaiseError} = 1;
+    #$self->{dbh}->{RaiseError} = 1;
     try {
         if ($already_exists) {
             $stmt = qq(delete from section where id in (
@@ -169,13 +177,13 @@ sub db_add_section {
                     ));
             $self->{dbh}->do($stmt);
         }
-        $stmt = qq(insert or ignore into program (name) values ("$current->{program}" ));
+        $stmt = qq(insert ignore into program (name) values ("$current->{program}" ));
         $self->{dbh}->do($stmt);
         $stmt
-            = qq(insert or ignore into series (series_number,program_id) values ("$current->{series}",
+            = qq(insert ignore into series (series_number,program_id) values ("$current->{series}",
             (select id from program where name="$current->{program}")));
         $self->{dbh}->do($stmt);
-        $stmt = qq(insert or ignore into episode(episode_number,series_id) values (
+        $stmt = qq(insert  ignore into episode(episode_number,series_id) values (
         $current->{episode},
         (select series_id from videos where program_name="$current->{program}"
         and series_number=$current->{series})));
@@ -185,19 +193,23 @@ sub db_add_section {
                     values ($current->{section},
                     (select episode_id from videos where program_name="$current->{program}"
         and series_number=$current->{series} and episode_number=$current->{episode}),
-        strftime('%H:%M:%f',"$start_time"),strftime('%H:%M:%f',"$end_time")
-        ,(select id from raw_file where name="$current->{file}"),0
+        "$start_time","$end_time",(select id from raw_file where name="$current->{file}"),0
         ));
         $self->{dbh}->do($stmt);
-        $self->{dbh}->commit;
+        $self->{dbh}->commit();
     }
     catch {
         warn "Transaction aborted because $_";    # Try::Tiny copies $@ into $_
                                                   # now rollback to undo the incomplete changes
                                                   # but do it in an eval{} as it may also fail
-        eval { $self->{dbh}->rollback };
+        eval { $self->{dbh}->rollback() };
+        return 1;
 
         # add other application on-error-clean-up code here
+    }
+    finally {
+        return 0;
     };
+    return 0;
 }
 1;
