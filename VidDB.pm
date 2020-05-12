@@ -86,7 +86,6 @@ sub db_fetch {
 
 =head2 get_last_values
 =cut
-
 sub get_last_values {
     my ($self) = @_;
     return $self->db_fetch(
@@ -125,8 +124,10 @@ sub db_fetch_new_files {
     my ($self) = @_;
     return $self->db_fetch(
         qq(
-        select name,video_length,last_updated from  raw_file
-                    where status=0
+        select a.name,a.video_length,a.last_updated,count(b.section_number) section_count from  raw_file a
+            left outer join section b on b.raw_file_id =a.id
+            where a.status=0
+            group by a.name
               order by k1,k2;
               )
     );
