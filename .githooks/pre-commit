@@ -4,13 +4,16 @@
 #exts="\.\(ext\|ext2\)$"
 exts="\.pl$"
 
-formatter=$(which ${HOME}/perl5/bin/perltidy)
-if [ -z "$formatter" ]
-then
-  1>&2 echo "$formatter not found. Pre-commit formatting will not be done."
-  exit 0
+if [ -x /usr/bin/perltidy ] ; then
+	formatter=/usr/bin/perltidy
+else
+	formatter=$(which ${HOME}/perl5/bin/perltidy)
+	if [ -z "$formatter" ]
+	then
+	  1>&2 echo "$formatter not found. Pre-commit formatting will not be done."
+	  exit 0
+	fi
 fi
-
 # Format staged files
 for file in `git diff --cached --name-only --diff-filter=ACMR | grep $exts`
 do
@@ -22,11 +25,8 @@ do
   perms=$(git ls-files -s "$file"|awk '{print $1}')
 
   # Add it back to index
-  #git update-index --add --cacheinfo 100644 "$hash" "$file"
-  #git update-index --add --cacheinfo 100755 "$hash" "$file"
   git update-index --add --cacheinfo $perms  "$hash" "$file"
   # Remove the tmp file
-  #cat "$file.tmp" >"${file}" && rm "$file.tmp"
   rm "$file.tmp"
   git show ":$file" > "$file"
 done
