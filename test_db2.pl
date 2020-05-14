@@ -8,6 +8,7 @@ my $c1 = new VidDB( "test", "testdb" );    # Databse , login-path
 my $cnt;
 
 print "$c1  ->{dsn}\n$c1->{user},$c1->{password}\n";
+print $c1->db_fetch_one(" select count(*) from raw_file");
 
 # Create some new files
 sub create_new_files {

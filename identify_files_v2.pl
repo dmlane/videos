@@ -6,13 +6,13 @@ use MP4::Info;
 use Getopt::Std;
 
 #use Term::Menus;
+#use Term::ReadKey;
+#use Term::Screen;
 use File::Basename;
-use Term::ReadKey;
 use feature 'switch';
 use Clipboard;
 use Const::Fast;
 use Carp qw( croak );
-use Term::Screen;
 use lib dirname(__FILE__);
 use VidScreen;
 
@@ -38,6 +38,9 @@ my $procfile = "#";
 my $screen = new VidScreen;
 my $db     = new VidDB( "videos", "videos" );
 open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
+our $new_files;     # Array of all new files to process
+our $last_state;    # Details from last run
+our $skip_files_with_sections = 0;   # Set to 1 if we want to skip over files where num_sections !=0
 
 sub fill_buff {
 
@@ -71,7 +74,7 @@ Put new entry in database *or* replace existing entry
 
 sub save_results {
 
-    my ( $current, $start_time, $end_time ) = @_;
+    my ( $current, $start_time, $end_time, $file_sub ) = @_;
     my $exists = 0;
     my $ichar;
     my $prompt;
@@ -92,11 +95,11 @@ sub save_results {
         die "Cannot insert section on 2nd attempt"
             if $db->db_add_section( $current, $start_time, $end_time, 1 ) == 1;
         $change_in_sections = 0;
-        printf LOG "%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n", $current->{file}, $start_time, $end_time,
-            $current->{program},
-            $current->{series}, $current->{episode}, $current->{section};
-        $current->{section_count} += $change_in_sections;
     }
+    printf LOG "%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n", $current->{file}, $start_time, $end_time,
+        $current->{program},
+        $current->{series}, $current->{episode}, $current->{section};
+    @{$new_files}[$file_sub]->{section_count} += $change_in_sections;
     $screen->scroll_top(
         sprintf(
             "%s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
@@ -104,6 +107,7 @@ sub save_results {
             $current->{series}, $current->{episode}, $current->{section}
         )
     );
+    $screen->update_values();
     return 0;
 }
 
@@ -139,8 +143,9 @@ sub fetch_new_files {
     $db->db_close();
 
     # Get records into an array
-    $result = $db->db_fetch_new_files();
-    $screen->print_status( sprintf "There are now %d new files to process", scalar @{$result} );
+    #$result = $db->db_fetch_new_files();
+    $new_files = $db->db_fetch_new_files();
+    $screen->print_status( sprintf "There are now %d new files to process", scalar @{$new_files} );
     return $result;
 }
 
@@ -164,16 +169,18 @@ sub get_program {
 sub process_file {
 
     # **
-    our ( $previous, $current, $video_length ) = @_;
-    my $prompt = "";
+    #our ( $previous, $current, $video_length ) = @_;
+    our ( $previous, $current, $file_sub ) = @_;
+    my $video_length = @{$new_files}[$file_sub]->{video_length};
+    my $prompt       = "";
     my $char;
     my $ichar;
     our $HI = chr(27) . '[1;33m';
     our $MD = chr(27) . '[1;36m';
     our $LO = chr(27) . '[0m';
-    my ( $start_time, $end_time );
+    my ( $start_time, $end_time ) = [ ('00:00:00.000') x 2 ];
     our $result;
-    my ( $start_new, $end_new );
+    my ( $start_new, $end_new ) = [ ('00:00:00.000') x 2 ];
     our %delta;
     my @nm = ( "file", "Program", "Series", "Episode", "Section" );
     my $fn = $dir . "/" . $current->{file};
@@ -192,12 +199,19 @@ sub process_file {
                 $previous->{$key} = $current->{$key};
             }
         }
-        $result = sprintf "File %s Program %s Series %s Episode %s Section %s:", $delta{file},
+        $result
+            = sprintf "File %s Prog %s Ser %s Epis %s Sect %s (#%d):",
+            $delta{file},
             $delta{program},
-            $delta{series}, $delta{episode}, $delta{section};
+            $delta{series}, $delta{episode}, $delta{section},
+            @{$new_files}[$file_sub]->{section_count};
         return $result;
     }
 OUTER: while (1) {
+        $screen->show_values(
+            $current->{file},    $current->{program}, $current->{series}, $current->{episode},
+            $current->{section}, $start_time,         $end_time
+        );
         $char = $screen->get_char( format_changes() );
         my $saved;
         given ($char) {
@@ -217,6 +231,22 @@ OUTER: while (1) {
                 $current->{section} = 0;
             }
             when ('f') { last OUTER; }
+            when ('F') {
+                $skip_files_with_sections = 1;
+                last OUTER;
+            }
+            when (/[dD]/) {
+            INNER: while (1) {
+                    $ichar = $ichar = $screen->get_char("Are you sure you want to delete $fn?");
+                    last INNER if $ichar =~ "[yYnN]";
+                }
+                if ( $ichar =~ "[Yy]" ) {
+                    $db->db_execute(
+                        qq(update raw_file set status=99 where name="$current->{file}"));
+                    rename $fn, $fn . ".remove";
+                    last OUTER;
+                }
+            }
             when ('s') {
                 if ( $current->{program} eq "" ) {
                     $screen->print_status("You must define Program first");
@@ -227,12 +257,22 @@ OUTER: while (1) {
                 $end_time           = $video_length;
             INNER: while (1) {
                     $start_new = $screen->get_timestamp( "Start time", $start_time );
-                    $end_new   = $screen->get_timestamp( "End time",   $end_time );
-                    $ichar     = $screen->get_char("$start_new -> $end_new     Y=OK (B=Back)?");
+                    $screen->show_values(
+                        $current->{file},    $current->{program}, $current->{series},
+                        $current->{episode}, $current->{section}, $start_time,
+                        $end_time
+                    );
+                    $end_new = $screen->get_timestamp( "End time", $end_time );
+                    $screen->show_values(
+                        $current->{file},    $current->{program}, $current->{series},
+                        $current->{episode}, $current->{section}, $start_time,
+                        $end_time
+                    );
+                    $ichar = $screen->get_char("$start_new -> $end_new     Y=OK (B=Back)?");
                     last INNER if $ichar =~ "[yYbB]";
                 }
                 if ( $ichar =~ "[yY]" ) {
-                    if ( save_results( $current, $start_new, $end_new ) == 0 ) {
+                    if ( save_results( $current, $start_new, $end_new, $file_sub ) == 0 ) {
                         $start_time = $start_new;
                         $end_time   = $end_new;
                         $screen->print_status(
@@ -262,7 +302,6 @@ OUTER: while (1) {
 sub process_new_files {
 
     # **
-    my ( $last_state, $all_new ) = @_;
     my %previous_value = ( file => "", program => "", series => 1, episode => 1, section => 0 );
     my %current_value  = ( file => "", program => "", series => 1, episode => 1, section => 0 );
     my $prompt;
@@ -274,10 +313,16 @@ sub process_new_files {
     $current_value{episode} = $last_state->{episode_number};
     $current_value{section} = $last_state->{section_number};
     $file_sub               = 0;
-    while ( $file_sub < @{$all_new} ) {
-        $file = @{$all_new}[$file_sub];
+    while ( $file_sub < @{$new_files} ) {
+        $file = @{$new_files}[$file_sub];
+        unless ( $file->{section_count} == 0 or $skip_files_with_sections == 0 ) {
+            $file_sub++;
+            next;
+        }
         $current_value{file} = $file->{name};
-        if ( process_file( \%previous_value, \%current_value, $file->{video_length} ) ) {
+
+        #if ( process_file( \%previous_value, \%current_value, $file->{video_length} ) ) {
+        if ( process_file( \%previous_value, \%current_value, $file_sub ) ) {
             $file_sub--;
             $file_sub = 0 if $file_sub < 0;
         }
@@ -311,9 +356,9 @@ sub main {
 
     # Get last 8 sections of video processed
     # Put a list of new mp4 files on filesystem into table new_files
-    my $all_new     = fetch_new_files();
-    my $current_rec = fill_buff();
-    process_new_files( $current_rec, $all_new );
+    fetch_new_files();    # Puts results into $new_files
+    $last_state = fill_buff();
+    process_new_files();
 }
 eval { main() };
 close(LOG);

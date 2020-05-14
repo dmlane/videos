@@ -82,10 +82,20 @@ sub db_fetch {
     return $results;
 }
 
+sub db_fetch_one {
+    my ( $self, $stmt ) = @_;
+    my $results;
+    $self->db_connect() if $self->{connected} == 0;
+    $results = $self->{dbh}->selectall_arrayref("$stmt")->[0][0];
+    $self->db_close() if $self->{connected} == 0;
+    return $results;
+}
+
 #=========================================================================#
 
 =head2 get_last_values
 =cut
+
 sub get_last_values {
     my ($self) = @_;
     return $self->db_fetch(
@@ -123,10 +133,10 @@ sub get_last20_sections {
 sub db_fetch_new_files {
     my ($self) = @_;
     return $self->db_fetch(
-        qq(
+        qq( 
         select a.name,a.video_length,a.last_updated,count(b.section_number) section_count from  raw_file a
             left outer join section b on b.raw_file_id =a.id
-            where a.status=0
+            where a.status=0 
             group by a.name
               order by k1,k2;
               )
@@ -152,8 +162,10 @@ sub db_add_section {
     die "No data found" if @{$rec}[0]->{count} != 1;
 
     # File exists so check if section exists
-    $stmt
-        = qq(select * from videos where file_name="$current->{file}" and section_number=$current->{section};);
+    $stmt = qq(select * from videos where program_name="$current->{program}" and
+                series_number=$current->{series} and
+                episode_number=$current->{episode} and
+                section_number=$current->{section};);
     $sth = $self->{dbh}->prepare($stmt);
     $sth->execute();
     my $existing_section = $sth->fetchall_arrayref( {} );
@@ -171,39 +183,52 @@ sub db_add_section {
     #--> We are allowed to do this
     #$self->{dbh}->{RaiseError} = 1;
     try {
+        my ( $program_id, $series_id, $episode_id, $section_id );
         if ($already_exists) {
             $stmt = qq(delete from section where id in (
-                    select section_id from videos where file_name="$current->{file}"
-                    and section_number=$current->{section}
+                    select section_id from videos where 
+                    program_name="$current->{program}" and
+                    series_number=$current->{series} and
+                    episode_number=$current->{episode} and
+                    section_number=$current->{section}
                     ));
             $self->{dbh}->do($stmt);
         }
         $stmt = qq(insert ignore into program (name) values ("$current->{program}" ));
         $self->{dbh}->do($stmt);
-        $stmt
-            = qq(insert ignore into series (series_number,program_id) values ("$current->{series}",
-            (select id from program where name="$current->{program}")));
-        $self->{dbh}->do($stmt);
+        $program_id
+            = $self->db_fetch_one(qq(select id from program where name= "$current->{program}"));
+        #
+        $stmt = qq(insert ignore into series (series_number,program_id)
+                    values ($current->{series},$program_id));
+        $self->db_execute($stmt);
+        $series_id = $self->db_fetch_one(
+            qq(select id from series where program_id=$program_id and
+                                         series_number= $current->{series})
+        );
+        #
         $stmt = qq(insert  ignore into episode(episode_number,series_id) values (
-        $current->{episode},
-        (select series_id from videos where program_name="$current->{program}"
-        and series_number=$current->{series})));
-        $self->{dbh}->do($stmt);
+                    $current->{episode},$series_id));
+        $self->db_execute($stmt);
+        $episode_id = $self->db_fetch_one(
+            qq(select id from episode where series_id=$series_id and
+                                         episode_number= $current->{episode})
+        );
+        #
         $stmt
             = qq(insert into section(section_number,episode_id,start_time,end_time,raw_file_id,status)
                     values ($current->{section},
-                    (select episode_id from videos where program_name="$current->{program}"
-        and series_number=$current->{series} and episode_number=$current->{episode}),
+                    $episode_id ,
         "$start_time","$end_time",(select id from raw_file where name="$current->{file}"),0
         ));
-        $self->{dbh}->do($stmt);
+        $self->db_execute($stmt);
         $self->{dbh}->commit();
     }
     catch {
-        warn "Transaction aborted because $_";    # Try::Tiny copies $@ into $_
-                                                  # now rollback to undo the incomplete changes
-                                                  # but do it in an eval{} as it may also fail
-        eval { $self->{dbh}->rollback() };
+        die "Transaction aborted because $_\n$stmt\n"; # Try::Tiny copies $@ into $_
+                                                       # now rollback to undo the incomplete changes
+                                                       # but do it in an eval{} as it may also fail
+                                                       #eval { $self->{dbh}->rollback() };
         return 1;
 
         # add other application on-error-clean-up code here
