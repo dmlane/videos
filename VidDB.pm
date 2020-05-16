@@ -7,31 +7,32 @@ use feature 'switch';
 no warnings 'experimental::smartmatch';
 our $dsn;
 
+=head2 read_params
+Fetch the parameters from a parameter file using mysql utility. In MariaDB,
+this function no longer exists, so I created a dummy script in /usr/local/bin
+which produces the same results.
+=cut
+
 sub read_params {
     my ($login_path) = @_;
-    my ( $user, $password, $host, $port ) = ("") x 4;
+    my %arr;
     open( PARAMS, "/usr/local/bin/my_print_defaults -s ${login_path}|" );
     while (<PARAMS>) {
         chomp;
-        my ( $key, $value ) = split /=/, $_, 2;
-        given ($key) {
-            when ("--user")     { $user     = $value }
-            when ("--password") { $password = $value }
-            when ("--host")     { $host     = $value }
-            when ("--port")     { $port     = $value }
-        }
+        m/^\w*--([^=]*)=\s*([^\s]*)\s*$/;
+        $arr{$1} = $2;
     }
     close(PARAMS);
-    return ( $user, $password, $host, $port );
+    return %arr;
 }
 
 sub new {
     my ( $class, $database, $login_path ) = @_;
-    my ( $user, $password, $host, $port ) = read_params($login_path);
-    my $self = {
-        'dsn'       => "DBI:MariaDB:database=$database;host=$host;port=$port",
-        'user'      => $user,
-        'password'  => $password,
+    my %db_param = read_params($login_path);
+    my $self     = {
+        'dsn'       => "DBI:MariaDB:database=$database;host=$db_param{host};port=$db_param{port}",
+        'user'      => $db_param{user},
+        'password'  => $db_param{password},
         'dbh'       => "",
         'connected' => 0,
     };

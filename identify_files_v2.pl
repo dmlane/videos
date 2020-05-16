@@ -4,10 +4,6 @@ use Pod::Usage;
 use DBI;
 use MP4::Info;
 use Getopt::Std;
-
-#use Term::Menus;
-#use Term::ReadKey;
-#use Term::Screen;
 use File::Basename;
 use feature 'switch';
 use Clipboard;
@@ -362,7 +358,7 @@ sub main {
 }
 eval { main() };
 close(LOG);
-warn    if $@;
+warn if $@;
 exit(1) if $@;
 
 #=========================== POD ============================#

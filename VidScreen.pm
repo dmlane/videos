@@ -42,9 +42,6 @@ sub show_values {
     #
     my $n;
     for ( $n = 0; $n < 7; $n++ ) {
-        #
-        #
-        #
         $self->{new_values}[$n] = $_[$n];
         $self->{ansi}[$n]       = $MD;
         $self->{ansi}[$n]       = $HI if $self->{new_values}[$n] ne $self->{stored_values}[$n];
