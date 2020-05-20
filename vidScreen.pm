@@ -41,8 +41,10 @@ use strict;
     sub display_status {
         my ( $self, $msg ) = @_;
         $status = $msg;
-        $scr->at( 0, 0 )->reverse()->puts( substr( $status, 0, $cols ) )
-            ->normal()->clreol();
+        my $col_start = $cols - length($status);
+        $col_start = 0 if $cols < 0;
+        $scr->at( 0, 0 )->clreol()->at( 0, $col_start )->reverse()
+            ->puts( substr( $status, 0, $cols ) )->normal();
     }
 
     sub display_screen {
@@ -58,11 +60,12 @@ use strict;
         }
         my $y         = 1;
         my $start_sub = $buffer_size - $rows + $bottom_free_lines + 1;
-        $self->display_status(">>>rows=$rows,cols=$cols<<<");
+
+        # $self->display_status(">>>rows=$rows,cols=$cols<<<");
         for ( my $n = $start_sub; $n < $buffer_size; $n++ ) {
             $scr->at( $y++, 0 )->puts( $buffer[$n], 0, $cols )->clreol();
         }
-        $scr->at( ++$y, 0 )->puts( substr( $separator, 0, $cols ) )->clreos();
+        $scr->at( ++$y, 0 )->puts( substr( $separator, 0, $cols ) ); #->clreos();
     }
 
     sub scroll {
@@ -197,7 +200,7 @@ use strict;
             if ( $delta_secs < 0.000 ) {
                 $self->display_status(
                     "Start time cannot be greater than stop time");
-                last;
+                next;
             }
             my $res = $self->get_char(
                 sprintf( "Create section %s -> %s? [y|n|b]? ", @value ) );
