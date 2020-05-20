@@ -1,173 +1,212 @@
 use strict;
-use Term::Screen;
-use Clipboard;
+{
 
-package VidScreen;
-use Const::Fast;
-const our $buffer_size => 200;
-const our $HI          => chr(27) . '[1;33m';
-const our $MD          => chr(27) . '[1;36m';
-const our $LO          => chr(27) . '[0m';
+    package vidScreen;
 
-sub new {
-    my $class = shift;
+    # use Exporter;
+    use Term::Screen;
+    use Clipboard;
+    use Const::Fast;
+    use File::Basename;
+    use lib dirname(__FILE__);
+    use vidData;
 
-    #my $max_buffer = 200;
-    my $self = {
-        'scr'            => -1,
-        'rows'           => -1,
-        'cols'           => -1,
-        'max_buffer'     => $buffer_size,
-        'separator_line' => $buffer_size - 4,
-        'status_line'    => $buffer_size - 1,
-        'buffer'         => [ (' ') x $buffer_size ],
-        'stored_values'  => [ (' ') x 7 ],
-        'new_values'     => [ (' ') x 7 ],
-        'ansi'           => [ (' ') x 7 ],
-        'top_status'     => ' ',
-    };
-    $self->{scr} = Term::Screen->new()
-        or die "Cannot run Term::Screen->new";
-    $self->{rows}                              = $self->{scr}->rows();
-    $self->{cols}                              = $self->{scr}->cols();
-    $self->{buffer}[ $self->{separator_line} ] = "_" x 200;
-    $self->{scr}->clrscr();
-    bless $self, $class;
-    return $self;
-}
+    # our @ISA    = qw(Exporter);
+    # our @EXPORT = qw(show_values);
+    const my $buffer_size       => 100;
+    const my $bottom_free_lines => 4;
+    const my $separator         => "_" x 200;
+    const my @keys              => qw/file program series episode section/;
+    const my $ctrlC_value       => "#CtrlC-value#";
 
-sub show_values {
-    my $self = shift;
-    #
-    #
-    my $n;
-    for ( $n = 0; $n < 7; $n++ ) {
-        $self->{new_values}[$n] = $_[$n];
-        $self->{ansi}[$n]       = $MD;
-        $self->{ansi}[$n]       = $HI if $self->{new_values}[$n] ne $self->{stored_values}[$n];
-        #
+    our @buffer         = ( (' ') x $buffer_size );
+    our $current_values = new vidData;
+    our $stored_values  = new vidData;
+    our $status         = "";
+    our $scr;
+    our $rows;
+    our $cols;
+
+    sub new {
+        my $class = shift;
+        my $self  = {};
+        $scr = Term::Screen->new()
+            or die "Cannot run Term::Screen->new";
+        $rows = $scr->rows();
+        $cols = $scr->cols();
+        $scr->clrscr();
+        bless $self, $class;
     }
-    $self->{top_status} = sprintf(
-        "%s%-32s%s %s%20s%s %s%3d%s %s%3d%s %s%3d%s %s%s%s %s%s%s",
-        $self->{ansi}[0], $self->{new_values}[0], $MD,
-        $self->{ansi}[1], $self->{new_values}[1], $MD,
-        $self->{ansi}[2], $self->{new_values}[2], $MD,
-        $self->{ansi}[3], $self->{new_values}[3], $MD,
-        $self->{ansi}[4], $self->{new_values}[4], $MD,
-        $self->{ansi}[5], $self->{new_values}[5], $MD,
-        $self->{ansi}[6], $self->{new_values}[6], $MD
-    );
-    $self->{scr}->at( 0, 0 )->puts( $self->{top_status} )->clreol();
-}
 
-sub update_values {
-    my $self = shift;
-    for ( my $n = 0; $n < 7; $n++ ) {
-        $self->{stored_values}[$n] = $self->{new_values}[$n];
+    sub display_status {
+        my ( $self, $msg ) = @_;
+        $status = $msg;
+        $scr->at( 0, 0 )->reverse()->puts( substr( $status, 0, $cols ) )
+            ->normal()->clreol();
     }
-}
 
-sub print_screen {
-    my ($self) = @_;
-    $self->{scr}->resize();    # This will tell package to re-check the dimensions
-    my $rows = $self->{scr}->rows();
-    my $cols = $self->{scr}->cols();
-    printf "$rows - $cols\n";
-    if ( $rows != $self->{rows} or $cols != $self->{cols} ) {
-        $self->{scr}->clrscr();
-        $self->{rows}                              = $rows;
-        $self->{cols}                              = $cols;
-        $self->{buffer}[ $self->{max_buffer} - 1 ] = "Screen resized to $rows x $cols";
-    }
-    for ( my $r = 0, my $n = $self->{max_buffer} - $rows; $r < $rows; $r++, $n++ ) {
-        $self->{scr}->at( $r, 0 )->puts( substr( $self->{buffer}[$n], 0, $cols ) )->clreol();
-    }
-    $self->{scr}->at( 0, 0 )->puts( $self->{top_status} )->clreol();
-}
-
-sub print_status {
-    my ( $self, $msg ) = @_;
-    my $scr = $self->{scr};
-    $self->{buffer}[ $self->{status_line} ] = $msg;
-    $self->print_screen();
-}
-
-sub scroll_top {
-    my ( $self, $msg ) = @_;
-    my ( $n, $m );
-    my $pp;
-    for ( $n = 1, $m = 0; $n < $self->{separator_line}; $n++, $m++ ) {
-        $self->{buffer}[$m] = $self->{buffer}[$n];
-    }
-    $self->{buffer}[ $self->{separator_line} - 1 ] = $msg;
-    $self->print_screen();
-}
-
-sub get_multi {
-    my ( $self, $prompt, $type, $default ) = @_;
-    my $string      = "";
-    my $full_prompt = "$prompt [${default}]: ";
-    my $c;
-    while () {
-        $self->print_screen();    # Inefficient, but ensures it works even if screen resized
-        $self->{scr}->at( $self->{rows} - 2, 0 )->puts($full_prompt)->clreol()->reverse()
-            ->puts($string)->normal();
-        return "" if $type == 2;
-        $c = $self->{scr}->noecho()->getch();
-        my $o = ord($c);
-        if ( $o == 127 )          # This should be backspace
+    sub display_screen {
+        my $self = shift;
+        $scr->resize();    #Re-check dimensions
+        unless ($rows == $scr->rows()
+            and $cols == $scr->cols() )
         {
-            $string = substr( $string, 0, -1 ) if length($string) > 0;
-            next;
+            $rows = $scr->rows();
+            $cols = $scr->cols();
+
+            #Clear screen needed?
         }
-        last if $c =~ /\r/;
-        if ( $c =~ /\d/ or $type == 0 ) {
-            $string = $string . $c;
+        my $y         = 1;
+        my $start_sub = $buffer_size - $rows + $bottom_free_lines + 1;
+        $self->display_status(">>>rows=$rows,cols=$cols<<<");
+        for ( my $n = $start_sub; $n < $buffer_size; $n++ ) {
+            $scr->at( $y++, 0 )->puts( $buffer[$n], 0, $cols )->clreol();
         }
+        $scr->at( ++$y, 0 )->puts( substr( $separator, 0, $cols ) )->clreos();
     }
-    return $default if length($string) == 0;
-    return $string;
-}
 
-sub get_string {
-    my ( $self, $prompt, $default ) = @_;
-    return $self->get_multi( $prompt, 0, $default );
-}
+    sub scroll {
+        my ( $self, $msg ) = @_;
+        shift @buffer;
+        push @buffer, $msg;
+        $self->display_screen();
+    }
 
-sub get_number {
-    my ( $self, $prompt, $default ) = @_;
-    return $self->get_multi( $prompt, 1, $default );
-}
+    sub display_values {
+        my $color = chr(27) . '[1;33m';
+        my $none  = chr(27) . '[0m';
+        my $low   = chr(27) . '[0;34m';
+        my ( $self, $new_values ) = @_;
+        $scr->at( $rows, 0 )->clreol();
+        foreach my $k (@keys) {
+            if ( $new_values->{$k} eq $stored_values->{$k} ) {
+                $scr->puts($low);
+            }
+            else {
+                $scr->puts($color);
+            }
+            $scr->puts( $new_values->{$k} );
+            $scr->puts("$none ");
+        }
+        $current_values = clone $new_values;
+    }
 
-sub get_char {
-    my ( $self, $prompt ) = @_;
-    $self->print_screen();
-    $self->{scr}->at( $self->{rows} - 2, 0 )->puts($prompt)->clreol();
-    return $self->{scr}->getch();
-}
+    sub update_values {
+        $stored_values = clone $current_values;
+    }
 
-sub get_timestamp {
-    my ( $self, $prompt, $default ) = @_;
-    my $value = "";
-    our $ctrlC_value = "#CtrlC-value#";
+   #==========================================================================
+   # Input routines
+    sub get_multi {
+        my ( $self, $prompt, $type, $default ) = @_;
+        my $string      = "";
+        my $full_prompt = "$prompt [${default}]: ";
+        my $c;
+        while () {
+            $self->display_screen()
+                ;   # Inefficient, but ensures it works even if screen resized
+            $scr->at( $rows - 2, 0 )->puts($full_prompt)->clreol()->reverse()
+                ->puts($string)->normal();
+            return "" if $type == 2;
+            $c = $scr->noecho()->getch();
+            my $o = ord($c);
+            if ( $o == 127 )    # This should be backspace
+            {
+                $string = substr( $string, 0, -1 ) if length($string) > 0;
+                next;
+            }
+            last if $c =~ /\r/;
+            if ( $c =~ /\d/ or $type == 0 ) {
+                $string = $string . $c;
+            }
+        }
+        return $default if length($string) == 0;
+        return $string;
+    }
 
-    sub ctrl_c {
+    sub get_string {
+        my ( $self, $prompt, $default ) = @_;
+        return $self->get_multi( $prompt, 0, $default );
+    }
+
+    sub get_number {
+        my ( $self, $prompt, $default ) = @_;
+        return $self->get_multi( $prompt, 1, $default );
+    }
+
+    sub get_char {
+        my ( $self, $prompt ) = @_;
+        $self->display_screen();
+        $scr->at( $rows - 2, 0 )->puts($prompt)->clreol();
+        return $scr->getch();
+    }
+
+    sub get_timestamp {
+        my ( $self, $field, $default_value ) = @_;
+        my $value  = "";
+        my $prompt = sprintf( "What is the %s [%s]: (Clipboard or ctrl-c):",
+            $field, $default_value );
+        $scr->at( $rows - 2, 0 )->puts($prompt)->clreol();
+
+        sub ctrl_c {
+            $SIG{INT} = \&ctrl_c;
+            print "^C$default_value^";
+            Clipboard->copy($ctrlC_value);
+        }
+        Clipboard->copy("0000000000");
+        select()->flush();
+
+        # $self->get_multi( $prompt, 2, $default_value );
         $SIG{INT} = \&ctrl_c;
-        Clipboard->copy($ctrlC_value);
+        until ( $value =~ /^\d\d:\d\d:\d\d\.\d\d\d$/ ) {
+            sleep(1);
+            $value = Clipboard->paste;
+            $value = $default_value if $value eq $ctrlC_value;
+        }
+        chomp $value;
+
+        # $scr->at( $rows - 2, 0 )->puts($prompt)->clreol()->reverse()
+        #     ->puts($value)->normal()->clreol();
+        $SIG{INT} = 'DEFAULT';
+        return $value;
     }
-    Clipboard->copy("0000000000");
-    select()->flush();
-    $self->get_multi( $prompt, 2, $default );
-    $SIG{INT} = \&ctrl_c;
-    until ( $value =~ /^\d\d:\d\d:\d\d\.\d\d\d/ ) {
-        sleep(1);
-        $value = Clipboard->paste;
-        $value = $default if $value eq $ctrlC_value;
+
+    sub millisecs {
+        my $ts = shift;
+        $ts =~ /(..):(..):(..\....)/;
+        return ( ( $1 * 60 + $2 ) * 60 + $3 );
     }
-    chomp $value;
-    $self->{scr}->at( $self->{rows} - 2, 0 )->puts($prompt)->clreol()->reverse()->puts($value)
-        ->normal()->clreol();
-    $SIG{INT} = 'DEFAULT';
-    return $value;
+
+    sub get_start_stop_times {
+        my ( $self, @defaults ) = @_;
+        my @value;
+        my @time_type = qw/Start-time Stop-time/;
+        my $prompt;
+        while (1) {
+            for ( my $n = 0; $n < 2; $n++ ) {
+                $value[$n]
+                    = $self->get_timestamp( $time_type[$n], $defaults[$n] );
+                $self->display_status( $value[$n] );
+            }
+            if ( $value[0] eq $value[1] ) {
+
+                # Saves having to do a crl-c
+                $value[1] = $defaults[1];
+            }
+            my $delta_secs = millisecs( $value[1] ) - millisecs( $value[0] );
+            if ( $delta_secs < 0.000 ) {
+                $self->display_status(
+                    "Start time cannot be greater than stop time");
+                last;
+            }
+            my $res = $self->get_char(
+                sprintf( "Create section %s -> %s? [y|n|b]? ", @value ) );
+            if ( $res =~ "[bB]" ) {
+                @value = ();
+                return @value;
+            }
+            return @value if $res =~ "[yY]";
+        }
+    }
 }
 1;
