@@ -1,10 +1,12 @@
 use strict;
+  use File::Basename;
+  use lib dirname(__FILE__);
 {
 
     package myDB;
     use DBI;
     use Try::Tiny;
-    use File::Basename;
+  
 
 =head2 read_params
 Fetch the parameters from a parameter file using mysql utility. In MariaDB,
@@ -202,6 +204,12 @@ Retrieve the last 8 sections processed from database
         );
         return $result;
     }
+    sub delete_file {
+         my ($self,$file_name) = @_;
+         $self->exec(
+             qq(update raw_file set status=99 where name="$file_name")
+         );
+    }
 
     sub add_section {
         my ( $self, $force, $args ) = @_;
@@ -219,13 +227,13 @@ Retrieve the last 8 sections processed from database
                 section_number=$args->{section})
         );
         if ( $section_id and !$force ) {
-            $self->debug("Section already exists and force not set");
+            #$self->debug("Section already exists and force not set");
             return (1);
         }
 
         # Delete existing section, as we're replacing it
         if ($section_id) {
-            $self->debug("Removing existing section to replace it");
+            #$self->debug("Removing existing section to replace it");
             $self->exec(qq(delete from section where id=$section_id));
         }
         #
