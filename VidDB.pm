@@ -5,6 +5,7 @@ package VidDB;
 use File::Basename;
 use lib dirname(__FILE__);
 use DBI;
+use File::Copy qw(copy);
 use Try::Tiny;
 use Const::Fast;
 use vidData;
@@ -61,7 +62,7 @@ sub read_params {
 }
 
 sub log {
-    my ( $self, $msg ) = @_;
+    my ( $self, $rec ) = @_;
     if ( $log_opened == 0 ) {
         my $logfile      = "$logfile_dir/$env_params{$gEnvironment}->{log}";
         my $modtime      = ( stat($logfile) )[9];
@@ -73,7 +74,10 @@ sub log {
         open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
         $log_opened = 1;
     }
-    print LOG $msg;
+    printf LOG "%7.7d,%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n",
+        $rec->{section_id}, $rec->{file}, $rec->{start_time}, $rec->{end_time},
+        $rec->{program}, $rec->{series}, $rec->{episode},
+        $rec->{section};
 }
 
 sub new {
@@ -183,7 +187,7 @@ sub get_last_values {
     my $res = $self->fetch_row(
         qq(
             select program_name program,series_number series,episode_number episode,section_number section 
-            from videos where raw_status = 0 order by k1,k2 desc limit 1 )
+            from videos where raw_status = 0 order by k1 desc,k2 desc limit 1 )
     );
     my $vidres = new vidData($res);
     return $vidres;
@@ -199,12 +203,12 @@ sub add_file {
 }
 
 sub to_vidData {
-    my ( $self, $arr );
-    my $last_rec = $#{$arr};
+    my ( $self, @arr ) = @_;
+    my $last_rec = @arr;
     my $rec;
     my @res;
-    for ( my $n; $n <= $last_rec; $n++ ) {
-        $rec = scalar @{$arr}[$n];
+    for ( my $n; $n < $last_rec; $n++ ) {
+        $rec = scalar $arr[$n];
         $res[$n] = new vidData($rec);
     }
     return @res;
@@ -231,6 +235,16 @@ sub get_last20_sections {
     return ( self->to_vidData($res) );
 }
 
+sub get_file_sections {
+    my ( $self, $file_name ) = @_;
+    my $stmt = qq(select program_name program,series_number series,episode_number episode,
+                section_number section, last_updated,file_name file, start_time,end_time,
+                section_id from videos where file_name ="$file_name" order by start_time asc);
+    my @res  = @{ $self->fetch($stmt) };
+    my @res2 = $self->to_vidData(@res);
+    return (@res2);
+}
+
 sub fetch_new_files {
     my ($self) = @_;
     return $self->fetch(
@@ -252,13 +266,18 @@ sub get_new_file_status {
                     from  raw_file a 
                     where a.status=0 
                      )
-       );
+    );
     return $result;
 }
 
 sub delete_file {
     my ( $self, $file_name ) = @_;
     $self->exec(qq(update raw_file set status=99 where name="$file_name"));
+}
+
+sub delete_section {
+    my ( $self, $id ) = @_;
+    $self->exec(qq(delete from section where id=$id ));
 }
 
 sub add_section {

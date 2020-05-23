@@ -5,6 +5,7 @@ use strict;
 
     # use Exporter;
     use Term::Screen;
+    use Term::ANSIColor qw(colored);
     use Clipboard;
     use Const::Fast;
     use File::Basename;
@@ -26,6 +27,8 @@ use strict;
     our $scr;
     our $rows;
     our $cols;
+    our $prev_section_id      = -1;
+    our $first_display_values = 0;
 
     sub new {
         my $class = shift;
@@ -48,7 +51,9 @@ use strict;
     }
 
     sub display_screen {
-        my $self = shift;
+        my ( $self, $current_file ) = @_;
+        my $msg;
+        $current_file = "AnyOldThing#=" unless defined $current_file;
         $scr->resize();    #Re-check dimensions
         unless ($rows == $scr->rows()
             and $cols == $scr->cols() )
@@ -63,34 +68,56 @@ use strict;
 
         # $self->display_status(">>>rows=$rows,cols=$cols<<<");
         for ( my $n = $start_sub; $n < $buffer_size; $n++ ) {
-            $scr->at( $y++, 0 )->puts( $buffer[$n], 0, $cols )->clreol();
+            my $msg = substr( $buffer[$n], 0, $cols );
+            if ( index( $buffer[$n], $current_file ) != -1 ) {
+                $msg = colored( $msg, "green" );
+            }
+            else {
+                $msg = colored( $msg, "blue" );
+            }
+            $scr->at( $y++, 0 )->puts($msg)->clreol();
         }
-        $scr->at( ++$y, 0 )->puts( substr( $separator, 0, $cols ) ); #->clreos();
+        $scr->at( ++$y, 0 )->puts( substr( $separator, 0, $cols ) );
     }
 
     sub scroll {
-        my ( $self, $msg ) = @_;
+        my ( $self, $rec ) = @_;
+        my $msg;
+        if ( $rec->{section_id} <= $prev_section_id ) {
+            $msg = "-" x 80;
+            shift @buffer;
+            push @buffer, $msg;
+        }
+        $msg = sprintf "%7d: %-30s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
+            $rec->{section_id}, $rec->{file}, $rec->{start_time}, $rec->{end_time},
+            $rec->{program}, $rec->{series}, $rec->{episode},
+            $rec->{section};
         shift @buffer;
         push @buffer, $msg;
-        $self->display_screen();
+        $self->display_screen( $rec->{file} );
+        $prev_section_id = $rec->{section_id};
     }
 
     sub display_values {
         my $color = chr(27) . '[1;33m';
         my $none  = chr(27) . '[0m';
         my $low   = chr(27) . '[0;34m';
-        my ( $self, $new_values ) = @_;
+        my ( $self, $new_values, $section_count ) = @_;
+        if ( $first_display_values == 0 ) {
+            $stored_values        = clone $new_values;
+            $first_display_values = 1;
+        }
         $scr->at( $rows, 0 )->clreol();
         foreach my $k (@keys) {
             if ( $new_values->{$k} eq $stored_values->{$k} ) {
-                $scr->puts($low);
+                $scr->puts( colored( $new_values->{$k}, "white" ) );
             }
             else {
-                $scr->puts($color);
+                $scr->puts( colored( $new_values->{$k}, "green" ) );
             }
-            $scr->puts( $new_values->{$k} );
-            $scr->puts("$none ");
+            $scr->puts(", ");
         }
+        $scr->puts(" (#sections=$section_count)");
         $current_values = clone $new_values;
     }
 
@@ -98,22 +125,21 @@ use strict;
         $stored_values = clone $current_values;
     }
 
-   #==========================================================================
-   # Input routines
+    #==========================================================================
+    # Input routines
     sub get_multi {
         my ( $self, $prompt, $type, $default ) = @_;
         my $string      = "";
         my $full_prompt = "$prompt [${default}]: ";
         my $c;
         while () {
-            $self->display_screen()
-                ;   # Inefficient, but ensures it works even if screen resized
-            $scr->at( $rows - 2, 0 )->puts($full_prompt)->clreol()->reverse()
-                ->puts($string)->normal();
+            $self->display_screen();    # Inefficient, but ensures it works even if screen resized
+            $scr->at( $rows - 2, 0 )->puts($full_prompt)->clreol()->reverse()->puts($string)
+                ->normal();
             return "" if $type == 2;
             $c = $scr->noecho()->getch();
             my $o = ord($c);
-            if ( $o == 127 )    # This should be backspace
+            if ( $o == 127 )            # This should be backspace
             {
                 $string = substr( $string, 0, -1 ) if length($string) > 0;
                 next;
@@ -139,16 +165,31 @@ use strict;
 
     sub get_char {
         my ( $self, $prompt ) = @_;
-        $self->display_screen();
-        $scr->at( $rows - 2, 0 )->puts($prompt)->clreol();
+        my $msg = "";
+        $self->display_screen( $current_values->{file} );
+        foreach my $bits ( split( "&", $prompt ) ) {
+            $msg = $msg . colored( substr( $bits, 0, 1 ), "yellow underline" ) . substr( $bits, 1 );
+        }
+        $scr->at( $rows - 2, 0 )->puts($msg)->clreol();
         return $scr->getch();
+    }
+
+    sub get_yn {
+        my ( $self, $prompt ) = @_;
+        my $c = 'x';
+        $self->display_screen();
+        until ( $c =~ "[yYnN]" ) {
+            $scr->at( $rows - 2, 0 )->puts($prompt)->clreol();
+            $c = $scr->getch();
+        }
+        return lc($c);
     }
 
     sub get_timestamp {
         my ( $self, $field, $default_value ) = @_;
-        my $value  = "";
-        my $prompt = sprintf( "What is the %s [%s]: (Clipboard or ctrl-c):",
-            $field, $default_value );
+        my $value = "";
+        my $prompt
+            = sprintf( "What is the %s [%s]: (Clipboard or ctrl-c):", $field, $default_value );
         $scr->at( $rows - 2, 0 )->puts($prompt)->clreol();
 
         sub ctrl_c {
@@ -198,12 +239,10 @@ use strict;
             }
             my $delta_secs = millisecs( $value[1] ) - millisecs( $value[0] );
             if ( $delta_secs < 0.000 ) {
-                $self->display_status(
-                    "Start time cannot be greater than stop time");
+                $self->display_status("Start time cannot be greater than stop time");
                 next;
             }
-            my $res = $self->get_char(
-                sprintf( "Create section %s -> %s? [y|n|b]? ", @value ) );
+            my $res = $self->get_char( sprintf( "Create section %s -> %s? [y|n|b]? ", @value ) );
             if ( $res =~ "[bB]" ) {
                 @value = ();
                 return @value;
