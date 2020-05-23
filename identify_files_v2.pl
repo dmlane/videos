@@ -6,8 +6,8 @@ use MP4::Info;
 use Const::Fast;
 use lib dirname(__FILE__);
 
-#use VidDB 'PROD';
-use VidDB 'TEST';
+use VidDB 'PROD';
+#use VidDB 'TEST';
 use vidScreen;
 use My::Globals;
 use Time::HiRes qw (sleep);
