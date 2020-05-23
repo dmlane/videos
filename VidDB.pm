@@ -182,6 +182,7 @@ sub fetch_row {
 
 =head2 get_last_values
 =cut
+
 sub get_last_values {
     my ($self) = @_;
     my $res = $self->fetch_row(
@@ -328,6 +329,14 @@ sub add_section {
     $self->exec(
         qq(insert into section(section_number,episode_id,start_time,end_time,raw_file_id,status)
                     values ($args->{section}, $episode_id , "$args->{start_time}","$args->{end_time}", $raw_id,0) )
+    );
+    #
+    $args->{section_id} = $self->fetch_number(
+        qq(
+            select id from section
+            where section_number=$args->{section} and episode_id=$episode_id 
+            and raw_file_id=$raw_id
+        )
     );
     #
     $self->disconnect();

@@ -6,8 +6,8 @@ use MP4::Info;
 use Const::Fast;
 use lib dirname(__FILE__);
 
-use VidDB 'PROD';
-#use VidDB 'TEST';
+#use VidDB 'PROD';
+use VidDB 'TEST';
 use vidScreen;
 use My::Globals;
 use Time::HiRes qw (sleep);
@@ -120,7 +120,8 @@ sub s02221_change_section {
         die "Cannot insert section on 2nd attempt"
             if $db->add_section( 1, $curr_values ) == 1;
     }
-    $db->log($curr_values);
+
+    #$db->log($curr_values);
     $scr->scroll($curr_values);
     $scr->update_values;
     $scr->display_status("Section created (Total for file=$curr_values->{section_count}");
@@ -144,7 +145,7 @@ sub s0222_process_file {
         }
         $c
             = $scr->get_char(
-                  "&Quit,&file,&Delete-file,&Program,&Series,&Episode,&section,&Back"
+                  "&Quit,&Refresh,&file,&Delete-file,&Program,&Series,&Episode,&section,&Back"
                 . $extra_option
                 . "?" );
         given ($c) {
@@ -178,13 +179,19 @@ sub s0222_process_file {
                     = $scr->get_number( "Episode number", $curr_values->{episode} + 1 );
                 $curr_values->{section} = 0;
             }
-            when ('s') { s02221_change_section($curr_values);return -97; }
+            when ('s') {
+                s02221_change_section($curr_values);
+                return -97;
+            }
             when (/[dD]/) {
                 my $ichar = $scr->get_yn("Are you sure you want to delete $curr_values->{file}?");
                 if ( $ichar eq "y" ) {
                     $db->delete_file( $curr_values->{file} );
                     return -98;
                 }
+            }
+            when (/[rR]/) {
+                return -96;
             }
             when (/[xX]/) {
                 my $sections = " ";
@@ -234,6 +241,7 @@ sub s022_process_new_files {
     my $result;
     my @file_sections;
     my $skip_over_files_with_sections = 1;
+    my $last_file;
 
     # Get the new files to process from the DB
     my $all_files = $db->fetch_new_files();
@@ -247,16 +255,19 @@ sub s022_process_new_files {
 
         # If a file we've already processed, then scroll it on the window and go on to the next
         # UNLESS $skip_over_files_with_sections is 0 .............
-        if ( $curr_file->{section_count} > 0 ) {
-            @file_sections = $db->get_file_sections( $curr_file->{file} );
-            for ( my $n = 0; $n < @file_sections; $n++ ) {
-                $scr->scroll( $file_sections[$n] );
-            }
-            if ( $skip_over_files_with_sections == 1 ) {
-                $file_sub++;
-                next;
+        if ( $curr_file->{file} ne $last_file ) {
+            if ( $curr_file->{section_count} > 0 ) {
+                @file_sections = $db->get_file_sections( $curr_file->{file} );
+                for ( my $n = 0; $n < @file_sections; $n++ ) {
+                    $scr->scroll( $file_sections[$n] );
+                }
+                if ( $skip_over_files_with_sections == 1 ) {
+                    $file_sub++;
+                    next;
+                }
             }
         }
+        $last_file                     = $curr_file->{file};
         $skip_over_files_with_sections = 0;
         $curr_values->{file}           = $curr_file->{file};
         $curr_values->{start_time}     = "00:00:00.000";
@@ -272,6 +283,14 @@ sub s022_process_new_files {
             $result = s0222_process_file( $curr_file, $curr_values, $last_values );
             s0223_tidy_file( $curr_file->{file} );
             given ($result) {
+                when (-96) {
+
+                    #Refresh screen
+                    $file_sub                      = 0;
+                    $last_file                     = "";
+                    $skip_over_files_with_sections = 1;
+                    next;
+                }
                 when (-97) {
 
                     # We've deleted a section -re-read what we have

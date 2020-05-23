@@ -83,7 +83,7 @@ use strict;
     sub scroll {
         my ( $self, $rec ) = @_;
         my $msg;
-        if ( $rec->{section_id} <= $prev_section_id ) {
+        if ( $rec->{section_id} < $prev_section_id ) {
             $msg = "-" x 80;
             shift @buffer;
             push @buffer, $msg;
