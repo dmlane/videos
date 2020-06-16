@@ -41,6 +41,29 @@ use strict;
         bless $self, $class;
     }
 
+    sub scroll_write {
+        my ( $self, $msg ) = @_;
+        shift @buffer;
+        push @buffer, $msg;
+        $self->display_screen();
+    }
+
+    sub display_list {
+        my ( $self, @arr ) = @_;
+        my $recsize = 0;
+        my $rec     = "";
+        for ( my $n = 0; $n < (@arr); $n++ ) {
+            $recsize += length( $arr[$n] ) + 1;
+            if ( $recsize > $cols ) {
+                $self->scroll_write($rec);
+                $rec     = "";
+                $recsize = 0;
+            }
+            $rec = $rec . $arr[$n] . " ";
+        }
+        $self->scroll_write($rec);
+    }
+
     sub display_status {
         my ( $self, $msg ) = @_;
         $status = $msg;

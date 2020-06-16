@@ -182,7 +182,6 @@ sub fetch_row {
 
 =head2 get_last_values
 =cut
-
 sub get_last_values {
     my ($self) = @_;
     my $res = $self->fetch_row(
@@ -192,6 +191,12 @@ sub get_last_values {
     );
     my $vidres = new vidData($res);
     return $vidres;
+}
+
+sub get_programs {
+    my ($self) = @_;
+    my $res = $self->fetch(qq(select name from program order by name));
+    return $res;
 }
 
 sub add_file {

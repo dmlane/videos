@@ -2,17 +2,17 @@
 use strict;
 use File::Basename;
 use Term::ANSIColor qw(colored);
+use Term::Menus;
 use MP4::Info;
 use Const::Fast;
 use lib dirname(__FILE__);
-
 use VidDB 'PROD';
+
 #use VidDB 'TEST';
 use vidScreen;
 use My::Globals;
 use Time::HiRes qw (sleep);
 use feature 'switch';
-
 no warnings 'experimental::smartmatch';
 our $db;
 our @new_files;
@@ -127,6 +127,23 @@ sub s02221_change_section {
     $scr->display_status("Section created (Total for file=$curr_values->{section_count}");
 }
 
+sub s02222_get_program {
+    my $list = $db->get_programs();
+
+    #print `tput smcup;`;
+    my @arr;
+    for ( my $n = 0; $n < ( @{$list} ); $n++ ) {
+        my $val = @{$list}[$n]->{name};
+        push @arr, $val;
+    }
+    $scr->display_list(@arr);
+
+    #my $banner    = "  Please Pick an Item:";
+    #my $selection = &pick( \@arr, $banner );
+    #print `tput rmcup`;
+    return;
+}
+
 sub s0222_process_file {
     my ( $curr_file, $curr_values, $last_values ) = @_;
     my $c;
@@ -145,7 +162,7 @@ sub s0222_process_file {
         }
         $c
             = $scr->get_char(
-                  "&Quit,&Refresh,&file,&Delete-file,&Program,&Series,&Episode,&section,&Back"
+            "&Quit,&ListProgams,&Refresh,&file,&Delete-file,&Program,&Series,&Episode,&section,&Back"
                 . $extra_option
                 . "?" );
         given ($c) {
@@ -158,6 +175,9 @@ sub s0222_process_file {
                     next;
                 }
                 return +1;
+            }
+            when ('L') {
+                s02222_get_program();
             }
             when ('P') {
                 my $res = $scr->get_string( "Program name", $curr_values->{program} );
