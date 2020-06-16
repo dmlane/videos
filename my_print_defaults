@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Simulate old utility
+sed -n "s/^${2}://p" ~/.mylogin.cnf

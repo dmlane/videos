@@ -1,3 +1,9 @@
+--drop table if exists section;
+--drop table if exists raw_file;
+--drop table if exists episode;
+--drop table if exists series;
+--drop table if exists program;
+
 -- Create syntax for TABLE 'program'
 CREATE TABLE program (
   id int(11) unsigned NOT NULL AUTO_INCREMENT, 
@@ -29,11 +35,11 @@ CREATE TABLE episode (
 -- Create syntax for TABLE 'raw_file'
 CREATE TABLE raw_file (
   id int(11) unsigned NOT NULL AUTO_INCREMENT, 
-  name varchar(32) COLLATE utf8_bin NOT NULL DEFAULT '', 
-  k1 varchar(32) COLLATE utf8_bin NOT NULL DEFAULT '', 
+  name varchar(32) COLLATE utf8_bin NOT NULL, 
+  k1 varchar(32) COLLATE utf8_bin NOT NULL, 
   k2 int(3) NOT NULL, 
   video_length time(3) NOT NULL, 
-  last_updated datetime NOT NULL, 
+  last_updated datetime NOT NULL default current_timestamp(), 
   status int(2) NOT NULL, 
   PRIMARY KEY (id), 
   UNIQUE KEY name (name)
@@ -54,6 +60,7 @@ CREATE TABLE section (
   CONSTRAINT section_ibfk_1 FOREIGN KEY (raw_file_id) REFERENCES raw_file (id)  on delete cascade,
   CONSTRAINT section_ibfk_2 FOREIGN KEY (episode_id) REFERENCES episode (id) on delete cascade
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8 COLLATE = utf8_bin;
+drop view videos;
 create view videos as 
 select 
   a.id program_id, 
@@ -79,6 +86,7 @@ from
   left outer join episode c on c.series_id = b.id 
   left outer join section d on d.episode_id = c.id 
   left outer join raw_file e on e.id = d.raw_file_id;
+drop view orphan_mp4;
 create view orphan_mp4 as 
 select 
   a.* 

@@ -1,11 +1,46 @@
 use strict;
 
 package VidDB;
+
+use File::Basename;
+use lib dirname(__FILE__);
 use DBI;
+use File::Copy qw(copy);
 use Try::Tiny;
-use feature 'switch';
-no warnings 'experimental::smartmatch';
-our $dsn;
+use Const::Fast;
+use vidData;
+
+const our $logfile_dir => $ENV{"HOME"} . "/data";
+our %env_params = (
+    TEST => {
+        login_path => "testdb",
+        database   => "test",
+        log        => "test.log"
+    },
+    PROD => {
+        login_path => "videos",
+        database   => "videos",
+        log        => "videos.log"
+    }
+);
+our $gEnvironment;
+our $log_opened = 0;
+
+sub import {
+    my ( $self, $env ) = @_;
+    if ( defined $env ) {
+        unless ( $env eq 'PROD'
+            or $env eq 'TEST' )
+        {
+            printf "Invalid environment '$env' in 'use $self'\n";
+            exit(1);
+        }
+        $gEnvironment = $env;
+    }
+    else {
+        $gEnvironment = 'TEST';
+    }
+}
 
 =head2 read_params
 Fetch the parameters from a parameter file using mysql utility. In MariaDB,
@@ -26,91 +61,163 @@ sub read_params {
     return %arr;
 }
 
+sub log {
+    my ( $self, $rec ) = @_;
+    if ( $log_opened == 0 ) {
+        my $logfile      = "$logfile_dir/$env_params{$gEnvironment}->{log}";
+        my $modtime      = ( stat($logfile) )[9];
+        my $logfile_copy = "$logfile." . $modtime;
+        if ( -e $logfile ) {
+            copy $logfile, $logfile_copy or die "Cannot make backup copy of log";
+            utime( undef, $modtime, $logfile_copy );
+        }
+        open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
+        $log_opened = 1;
+    }
+    printf LOG "%7.7d,%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n",
+        $rec->{section_id}, $rec->{file}, $rec->{start_time}, $rec->{end_time},
+        $rec->{program}, $rec->{series}, $rec->{episode},
+        $rec->{section};
+}
+
 sub new {
-    my ( $class, $database, $login_path ) = @_;
-    my %db_param = read_params($login_path);
-    my $self     = {
-        'dsn'       => "DBI:MariaDB:database=$database;host=$db_param{host};port=$db_param{port}",
-        'user'      => $db_param{user},
-        'password'  => $db_param{password},
-        'dbh'       => "",
-        'connected' => 0,
+    my ($class) = @_;
+    my $self = {
+        database  => $env_params{$gEnvironment}->{database},
+        connected => 0,
+        dbh       => "",
+        read_params( $env_params{$gEnvironment}->{login_path} )
     };
+    if ( $gEnvironment eq "TEST" ) {
+        warn "Using TEST database\n";
+        sleep(2);
+    }
     bless $self, $class;
 }
 
-sub db_connect {
-    my ($self) = @_;
-    $self->{dbh}
-        = DBI->connect( $self->{dsn}, $self->{user}, $self->{password}, { RaiseError => 1 } )
-        or die $DBI::errstr;
-    $self->{connected} = 1;
-    return;
+sub destroy {
+    close LOG if $log_opened == 1;
 }
 
-sub db_close {
-    my ($self) = @_;
+sub connect {
+    my $self = shift;
+    return
+        if $self->{connected} == 1;
+    $self->{dbh} = DBI->connect(
+        sprintf(
+            "DBI:MariaDB:database=%s;host=%s;port=%s",
+            $self->{database}, $self->{host}, $self->{port}
+        ),
+        $self->{user},
+        $self->{password},
+        { RaiseError => 1, AutoCommit => 0 }
+    ) or die $DBI::errstr;
+    $self->{connected} = 1;
+}
+
+sub disconnect {
+    my $self = shift;
+    return
+        if $self->{connected} == 0;
+    $self->{dbh}->commit();
     $self->{dbh}->disconnect();
     $self->{connected} = 0;
-    return;
 }
 
-sub db_set_autocommit {
-    my ( $self, $value ) = @_;
-    $self->{dbh}->{AutoCommit} = $value;
-}
-
-sub db_execute {
+# sub db_set_autocommit {
+#     my ( $self, $value ) = @_;
+#     $self->{dbh}->{AutoCommit} = $value;
+# }
+sub exec {
     my ( $self, $stmt ) = @_;
-    $self->db_connect() if $self->{connected} == 0;
-    my $sth = $self->{dbh}->prepare($stmt);
-    $sth->execute();
-    $self->db_close() if $self->{connected} == 0;
+    my $results;
+    my $conn = $self->{connected};    # Store state so that we know what to do later
+    $self->connect() if $conn == 0;
+    try {
+        my $sth = $self->{dbh}->prepare($stmt);
+        $sth->execute();
+    }
+    catch {
+        die ">>>Error found executing\n---\n$stmt\n---\n";
+    };
+    $self->disconnect() if $conn == 0;
+    return $results;
 }
 
-=head2 db_fetch
+=head2 fetch
 Fetch the results of the select provided into a hash array
 =cut
 
-sub db_fetch {
+sub fetch {
     my ( $self, $stmt ) = @_;
     my $results;
-    $self->db_connect() if $self->{connected} == 0;
-    my $sth = $self->{dbh}->prepare($stmt);
-    $sth->execute();
-    $results = $sth->fetchall_arrayref( {} );
-    $self->db_close() if $self->{connected} == 0;
+    my $conn = $self->{connected};    # Store state so that we know what to do later
+    $self->connect() if $conn == 0;
+    try {
+        my $sth = $self->{dbh}->prepare($stmt);
+        $sth->execute();
+        $results = $sth->fetchall_arrayref( {} );
+    }
+    catch {
+        die ">>>Error found executing\n---\n$stmt\n---\n";
+    };
+    $self->disconnect() if $conn == 0;
     return $results;
 }
 
-sub db_fetch_one {
+sub fetch_number {
     my ( $self, $stmt ) = @_;
-    my $results;
-    $self->db_connect() if $self->{connected} == 0;
-    $results = $self->{dbh}->selectall_arrayref("$stmt")->[0][0];
-    $self->db_close() if $self->{connected} == 0;
-    return $results;
+    my $results = $self->fetch($stmt);
+    return ( values( %{ $results->[0] } ) )[0];
 }
 
+sub fetch_row {
+    my ( $self, $stmt ) = @_;
+    my $results = $self->fetch($stmt);
+    return %{$results}[0];
+}
+
+#=========================================================================#
 #=========================================================================#
 
 =head2 get_last_values
 =cut
-
 sub get_last_values {
     my ($self) = @_;
-    return $self->db_fetch(
+    my $res = $self->fetch_row(
         qq(
-                        select program_name,series_number,episode_number,section_number from
-                        videos where raw_status = 1 order by k1,k2 desc limit 1 )
+            select program_name program,series_number series,episode_number episode,section_number section 
+            from videos where raw_status = 0 order by k1 desc,k2 desc limit 1 )
+    );
+    my $vidres = new vidData($res);
+    return $vidres;
+}
+
+sub get_programs {
+    my ($self) = @_;
+    my $res = $self->fetch(qq(select name from program order by name));
+    return $res;
+}
+
+sub add_file {
+    my ( $self, %args ) = @_;
+    $self->exec(
+        qq(
+            insert ignore into raw_file (name,k1,k2,video_length)
+            values('$args{file}','$args{key1}',$args{key2},'$args{video_length}'))
     );
 }
 
-sub db_add_new_file {
-    my ( $self, $sfn, $k1, $k2, $video_length, $epoch_timestamp ) = @_;
-    my $stmt = qq(insert ignore into raw_file (name,k1,k2,video_length)
-                          values('$sfn','$k1',$k2,'$video_length'));
-    my $rv = $self->{dbh}->do($stmt) or die $DBI::errstr;
+sub to_vidData {
+    my ( $self, @arr ) = @_;
+    my $last_rec = @arr;
+    my $rec;
+    my @res;
+    for ( my $n; $n < $last_rec; $n++ ) {
+        $rec = scalar $arr[$n];
+        $res[$n] = new vidData($rec);
+    }
+    return @res;
 }
 
 =head2  get_last8
@@ -119,23 +226,37 @@ Retrieve the last 8 sections processed from database
 
 sub get_last20_sections {
     my ($self) = @_;
-    my $last20_sections = qq(
-   select A.* from 
-       (select program_name,series_number,episode_number,section_number,last_updated,file_name,
-        start_time,end_time
-           from videos  order by last_updated desc limit 20)  A
-       order by last_updated asc;
+    my $res = $self->fetch(
+        qq(
+            select A.* from 
+                (select program_name program,series_number series,episode_number episode,
+                section_number section, last_updated,file_name file, start_time,end_time 
+                from videos order by last_updated desc limit 20)  A
+            order by last_updated asc
     
+    )
     );
-    #
-    return ( $self->db_fetch($last20_sections) );
+
+    # Put it into our standard format
+    return ( self->to_vidData($res) );
 }
 
-sub db_fetch_new_files {
+sub get_file_sections {
+    my ( $self, $file_name ) = @_;
+    my $stmt = qq(select program_name program,series_number series,episode_number episode,
+                section_number section, last_updated,file_name file, start_time,end_time,
+                section_id from videos where file_name ="$file_name" order by start_time asc);
+    my @res  = @{ $self->fetch($stmt) };
+    my @res2 = $self->to_vidData(@res);
+    return (@res2);
+}
+
+sub fetch_new_files {
     my ($self) = @_;
-    return $self->db_fetch(
+    return $self->fetch(
         qq( 
-        select a.name,a.video_length,a.last_updated,count(b.section_number) section_count from  raw_file a
+        select a.name file,a.video_length,a.last_updated,count(b.section_number) section_count
+        from  raw_file a
             left outer join section b on b.raw_file_id =a.id
             where a.status=0 
             group by a.name
@@ -144,99 +265,85 @@ sub db_fetch_new_files {
     );
 }
 
-sub db_add_section {
-    my ( $self, $current, $start_time, $end_time, $force ) = @_;
-    my $results;
-    my $stmt;
-    my $already_exists = 0;
+sub get_new_file_status {
+    my ($self) = @_;
+    my $result = $self->fetch_number(
+        qq(select count(*) 
+                    from  raw_file a 
+                    where a.status=0 
+                     )
+    );
+    return $result;
+}
 
-    #my %rec = @{$current};
-    print $current->{file} . "\n";
+sub delete_file {
+    my ( $self, $file_name ) = @_;
+    $self->exec(qq(update raw_file set status=99 where name="$file_name"));
+}
 
-    #-> file must exist in raw_files
-    $self->db_connect();
-    $self->db_set_autocommit(0);
-    $stmt = qq(select count(*) count from raw_file where name="$current->{file}");
-    my $sth = $self->{dbh}->prepare($stmt);
-    $sth->execute();
-    my $rec = $sth->fetchall_arrayref( {} );
-    die "No data found" if @{$rec}[0]->{count} != 1;
+sub delete_section {
+    my ( $self, $id ) = @_;
+    $self->exec(qq(delete from section where id=$id ));
+}
+
+sub add_section {
+    my ( $self, $force, $args ) = @_;
+    $self->connect();
+
+    # Check file exists in raw_file
+    my $raw_id = $self->fetch_number(qq(select id from raw_file where name="$args->{file}"));
+    die "Could not find '$args->{file}' in raw_file" unless $raw_id;
 
     # File exists so check if section exists
-    $stmt = qq(select * from videos where program_name="$current->{program}" and
-                series_number=$current->{series} and
-                episode_number=$current->{episode} and
-                section_number=$current->{section};);
-    $sth = $self->{dbh}->prepare($stmt);
-    $sth->execute();
-    my $existing_section = $sth->fetchall_arrayref( {} );
-    my $num_results      = scalar @{$existing_section};
-    if ( $num_results != 0 ) {
-
-        #Section already exists
-        $already_exists = 1;
-        if ( !$force ) {
-            $self->{dbh}->rollback();
-            return (1);
-        }
+    my $section_id = $self->fetch_number(
+        qq(select section_id from videos where program_name="$args->{program}" and
+                series_number=$args->{series} and
+                episode_number=$args->{episode} and
+                section_number=$args->{section})
+    );
+    if ( $section_id and !$force ) {
+        return (1);
     }
 
-    #--> We are allowed to do this
-    #$self->{dbh}->{RaiseError} = 1;
-    try {
-        my ( $program_id, $series_id, $episode_id, $section_id );
-        if ($already_exists) {
-            $stmt = qq(delete from section where id in (
-                    select section_id from videos where 
-                    program_name="$current->{program}" and
-                    series_number=$current->{series} and
-                    episode_number=$current->{episode} and
-                    section_number=$current->{section}
-                    ));
-            $self->{dbh}->do($stmt);
-        }
-        $stmt = qq(insert ignore into program (name) values ("$current->{program}" ));
-        $self->{dbh}->do($stmt);
-        $program_id
-            = $self->db_fetch_one(qq(select id from program where name= "$current->{program}"));
-        #
-        $stmt = qq(insert ignore into series (series_number,program_id)
-                    values ($current->{series},$program_id));
-        $self->db_execute($stmt);
-        $series_id = $self->db_fetch_one(
-            qq(select id from series where program_id=$program_id and
-                                         series_number= $current->{series})
-        );
-        #
-        $stmt = qq(insert  ignore into episode(episode_number,series_id) values (
-                    $current->{episode},$series_id));
-        $self->db_execute($stmt);
-        $episode_id = $self->db_fetch_one(
-            qq(select id from episode where series_id=$series_id and
-                                         episode_number= $current->{episode})
-        );
-        #
-        $stmt
-            = qq(insert into section(section_number,episode_id,start_time,end_time,raw_file_id,status)
-                    values ($current->{section},
-                    $episode_id ,
-        "$start_time","$end_time",(select id from raw_file where name="$current->{file}"),0
-        ));
-        $self->db_execute($stmt);
-        $self->{dbh}->commit();
+    # Delete existing section, as we're replacing it
+    if ($section_id) {
+        $self->exec(qq(delete from section where id=$section_id));
     }
-    catch {
-        die "Transaction aborted because $_\n$stmt\n"; # Try::Tiny copies $@ into $_
-                                                       # now rollback to undo the incomplete changes
-                                                       # but do it in an eval{} as it may also fail
-                                                       #eval { $self->{dbh}->rollback() };
-        return 1;
-
-        # add other application on-error-clean-up code here
-    }
-    finally {
-        return 0;
-    };
-    return 0;
+    #
+    $self->exec(qq(insert ignore into program (name) values ("$args->{program}" )));
+    my $program_id = $self->fetch_number(qq(select id from program where name= "$args->{program}"));
+    #
+    $self->exec(
+        qq(insert ignore into series (series_number,program_id)
+                    values ($args->{series},$program_id))
+    );
+    my $series_id = $self->fetch_number(
+        qq(select id from series where program_id=$program_id and
+                                         series_number= $args->{series})
+    );
+    #
+    $self->exec(
+        qq(insert  ignore into episode(episode_number,series_id) values (
+                    $args->{episode},$series_id))
+    );
+    my $episode_id = $self->fetch_number(
+        qq(select id from episode where series_id=$series_id and
+                                         episode_number= $args->{episode})
+    );
+    #
+    $self->exec(
+        qq(insert into section(section_number,episode_id,start_time,end_time,raw_file_id,status)
+                    values ($args->{section}, $episode_id , "$args->{start_time}","$args->{end_time}", $raw_id,0) )
+    );
+    #
+    $args->{section_id} = $self->fetch_number(
+        qq(
+            select id from section
+            where section_number=$args->{section} and episode_id=$episode_id 
+            and raw_file_id=$raw_id
+        )
+    );
+    #
+    $self->disconnect();
 }
 1;

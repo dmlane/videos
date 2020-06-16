@@ -1,394 +1,352 @@
-#!/usr/bin/env perl -w
+#!/usr/bin/env perl
 use strict;
-use Pod::Usage;
-use DBI;
-use MP4::Info;
-use Getopt::Std;
 use File::Basename;
-use feature 'switch';
-use Clipboard;
+use Term::ANSIColor qw(colored);
+use Term::Menus;
+use MP4::Info;
 use Const::Fast;
-use Carp qw( croak );
 use lib dirname(__FILE__);
-use VidScreen;
+use VidDB 'PROD';
 
-#use VidKomodo;
-use VidDB;
+#use VidDB 'TEST';
+use vidScreen;
+use My::Globals;
+use Time::HiRes qw (sleep);
+use feature 'switch';
 no warnings 'experimental::smartmatch';
+our $db;
+our @new_files;
+our $db_file_count;
+our $unix_file_count;
 
-#=========================================================================#
-const my $ReserveLines => 4;
-const my $HistorySize  => 20;
-const our $ctrlC_value => "#ControlC#";
-const our $logfile     => $ENV{"HOME"} . "/data/videos.log";
+sub s01_init {
 
-# Defines where we pick up the new videos (may be overridden by command line option)
-my $dir = "/System/Volumes/Data";
-$dir = "/Diskstation" if $^O eq "linux";
-$dir = $dir . "/Unix/Videos/Import";
-my $pdir = $dir . "/processing";
-$dir = "Z:\\Videos\\Import" if $^O eq "MSWin32";
-my $procfile = "#";
+    # 1. Initialise environment
+    $scr = new vidScreen;
 
-#my $screen   = new VidKomodo;
-my $screen = new VidScreen;
-my $db     = new VidDB( "videos", "videos" );
-open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
-our $new_files;     # Array of all new files to process
-our $last_state;    # Details from last run
-our $skip_files_with_sections = 0;   # Set to 1 if we want to skip over files where num_sections !=0
+    # 2. Test database access
+    $db            = new VidDB();
+    $db_file_count = $db->get_new_file_status();
 
-sub fill_buff {
-
-    # **
-    my $last20       = $db->get_last20_sections();
-    my $last_element = $#{$last20};
-    my $element;
-    if ( $last_element < 0 ) {
-        $element
-            = { program_name => "", series_number => 1, episode_number => 1, section_number => 0 };
-        return $element;
-    }
-    for ( my $n = 0; $n <= $last_element; $n++ ) {
-        $element = scalar @{$last20}[$n];
-        $screen->scroll_top(
-            sprintf(
-                "%s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
-                $element->{file_name},     $element->{start_time},
-                $element->{end_time},      $element->{program_name},
-                $element->{series_number}, $element->{episode_number},
-                $element->{section_number}
-            )
-        );
-    }
-    return @{$last20}[$last_element];
+    # 3. Test file-system access
+    die "Cannot access $mp4_dir" unless -d $mp4_dir;
+    die "Cannot access $pdir"    unless -d $pdir;
+    @new_files       = glob( $mp4_dir . '/*.mp4' );
+    $unix_file_count = @new_files;
 }
 
-=head2 save_results
-Put new entry in database *or* replace existing entry
-=cut
+sub s021_preprocess {
+    my ( $fn, $info, $vhours, $vmins );
+    my %val;
+    if ( $db_file_count > 1 ) {
 
-sub save_results {
+        # It looks as if the files have already been added
+        $scr->display_status(
+            "File processing skipped and using DB - " . $db_file_count . " files to process" );
+        return;
+    }
+    $db->connect();
 
-    my ( $current, $start_time, $end_time, $file_sub ) = @_;
-    my $exists = 0;
+    # Add any new files to the database
+    foreach my $full_name (@new_files) {
+        $val{file} = basename $full_name;
+        $info      = get_mp4info($full_name);
+        $vhours    = int( $info->{MM} / 60 );
+        $vmins     = int( $info->{MM} % 60 );
+        $val{video_length}
+            = sprintf( "%02d:%02d:%02d.%003d", $vhours, $vmins, $info->{SS}, $info->{MS} );
+
+        # Database can't do a version sort, so split the key fields so it can
+        if ( $val{file} =~ m/^([^_]*_[^_]*_[^_]*)\./ ) {
+            $val{key1} = $1;
+            $val{key2} = 0;
+        }
+        else {
+            ( $val{key1}, $val{key2} ) = ( $val{file} =~ /^(.*)_(\d+)\..*$/ );
+        }
+
+        # The DB ignores if the file exists already
+        $db->add_file(%val);
+    }
+
+    # Fetch the number of files again
+    my $res = $db->get_new_file_status();
+    $scr->display_status(
+        sprintf( "Number of new files ready for processing in database = %d", $res ) );
+    $db_file_count = $res;
+    $db->disconnect();
+    return;
+}
+
+sub s0221_prepare_file {
+    my $short_file  = shift;
+    my $target_name = "$mp4_dir/$short_file";
+    my $link_name   = "$pdir/$short_file";
+
+    # This is only needed if a previous run failed - it's probably already pointing to
+    # the correct file, but re-create it to be certain
+    unlink $link_name if -e $link_name;
+    system("ln $target_name $link_name") == 0
+        or die "Cannot ln $target_name to $link_name";
+}
+
+sub s02221_change_section {
+    my $curr_values = shift;
+    my @times;
     my $ichar;
-    my $prompt;
-    my $change_in_sections = 1;
-
-    if ( $db->db_add_section( $current, $start_time, $end_time, 0 ) == 1 ) {
+    my $new_values;
+    if ( $curr_values->{program} eq "" ) {
+        $scr->display_status("You must define Program first");
+        return;
+    }
+    $curr_values->{section}
+        = $scr->get_number( "Section number", $curr_values->{section} + 1 );
+    @times
+        = $scr->get_start_stop_times(
+        ( $curr_values->{start_time}, $curr_values->{video_length} ) );
+    return if @times == 0;    # Back was selected
+    $curr_values->{start_time} = $times[0];
+    $curr_values->{end_time}   = $times[1];
+    if ( $db->add_section( 0, $curr_values ) == 1 ) {
         while (1) {
-            $prompt
-                = sprintf "Program %s Series %s Episode %s Section %s already exists - replace?",
-                $current->{program},
-                $current->{series}, $current->{episode}, $current->{section};
-            $ichar = $screen->get_char("$prompt");
+            $ichar = $scr->get_char(
+                sprintf "Program %s Series %s Episode %s Section %s already exists - replace?",
+                $curr_values->{program}, $curr_values->{series},
+                $curr_values->{episode}, $curr_values->{section}
+            );
             last if ( $ichar =~ "[yYnN]" );
         }
-        if ( $ichar =~ "[nN]" ) {
-            return (1);
-        }
+        return (1) if $ichar =~ "[nN]";
         die "Cannot insert section on 2nd attempt"
-            if $db->db_add_section( $current, $start_time, $end_time, 1 ) == 1;
-        $change_in_sections = 0;
+            if $db->add_section( 1, $curr_values ) == 1;
     }
-    printf LOG "%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n", $current->{file}, $start_time, $end_time,
-        $current->{program},
-        $current->{series}, $current->{episode}, $current->{section};
-    @{$new_files}[$file_sub]->{section_count} += $change_in_sections;
-    $screen->scroll_top(
-        sprintf(
-            "%s %s -> %s %s_S%2.2dE%2.2d-%2.2d",
-            $current->{file},   $start_time,         $end_time, $current->{program},
-            $current->{series}, $current->{episode}, $current->{section}
-        )
-    );
-    $screen->update_values();
-    return 0;
+
+    #$db->log($curr_values);
+    $scr->scroll($curr_values);
+    $scr->update_values;
+    $scr->display_status("Section created (Total for file=$curr_values->{section_count}");
 }
 
-=head2 fetch_new_files
-Insert details of any new files found in $dir into the table new_files. We remove any files
-already present in raw_file (as it means they have already been partially or fully processed)
-=cut
+sub s02222_get_program {
+    my $list = $db->get_programs();
 
-sub fetch_new_files {
-    my ( $stmt, $fn, $info, $vhours, $vmins, $video_length, $epoch_timestamp, $sfn, $rv,
-        $result, $k1, $k2 );
-    $screen->print_status("Looking for new files to process");
+    #print `tput smcup;`;
+    my @arr;
+    for ( my $n = 0; $n < ( @{$list} ); $n++ ) {
+        my $val = @{$list}[$n]->{name};
+        push @arr, $val;
+    }
+    $scr->display_list(@arr);
 
-    #Get a list of all files in $dir which haven't already been processed
-    $db->db_connect();
-    for $fn (<$dir/V*.mp4>) {
-        $info   = get_mp4info($fn);
-        $vhours = int( $info->{MM} / 60 );
-        $vmins  = int( $info->{MM} % 60 );
-        $video_length
-            = sprintf( "%02d:%02d:%02d.%003d", $vhours, $vmins, $info->{SS}, $info->{MS} );
-        $epoch_timestamp = ( stat($fn) )[9];
-        $sfn             = basename($fn);
-        if ( $sfn =~ m/^([^_]*_[^_]*_[^_]*)\./ ) {
-            $k1 = $1;
-            $k2 = 0;
+    #my $banner    = "  Please Pick an Item:";
+    #my $selection = &pick( \@arr, $banner );
+    #print `tput rmcup`;
+    return;
+}
+
+sub s0222_process_file {
+    my ( $curr_file, $curr_values, $last_values ) = @_;
+    my $c;
+    my $extra_option;
+    my @file_sections;
+
+    #--
+    while (1) {
+        $scr->display_values( $curr_values, $curr_file->{section_count} );
+        if ( $curr_file->{section_count} == 0 ) {
+            $extra_option = "";
         }
         else {
-            ( $k1, $k2 ) = ( $sfn =~ /^(.*)_(\d+)\..*$/ );
+            # Add an extra option
+            $extra_option = "," . "e&Xterminate section";
         }
-        $db->db_add_new_file( $sfn, $k1, $k2, $video_length, $epoch_timestamp );
-    }
-    $db->db_close();
-
-    # Get records into an array
-    #$result = $db->db_fetch_new_files();
-    $new_files = $db->db_fetch_new_files();
-    $screen->print_status( sprintf "There are now %d new files to process", scalar @{$new_files} );
-    return $result;
-}
-
-sub get_program {
-    my ($default) = @_;
-    my $value;
-
-    #printf STDERR "What is the program name [$default]";
-    $value = $screen->get_string( "What is the program name", $default );
-
-    #$value = <STDIN>;
-    chomp $value;
-    $screen->print_status("Program changed from $default to $value");
-    return $default if ( length($value) < 1 );
-    return ($value);
-}
-
-=head2 process_file
-=cut
-
-sub process_file {
-
-    # **
-    #our ( $previous, $current, $video_length ) = @_;
-    our ( $previous, $current, $file_sub ) = @_;
-    my $video_length = @{$new_files}[$file_sub]->{video_length};
-    my $prompt       = "";
-    my $char;
-    my $ichar;
-    our $HI = chr(27) . '[1;33m';
-    our $MD = chr(27) . '[1;36m';
-    our $LO = chr(27) . '[0m';
-    my ( $start_time, $end_time ) = [ ('00:00:00.000') x 2 ];
-    our $result;
-    my ( $start_new, $end_new ) = [ ('00:00:00.000') x 2 ];
-    our %delta;
-    my @nm = ( "file", "Program", "Series", "Episode", "Section" );
-    my $fn = $dir . "/" . $current->{file};
-
-    $procfile = $pdir . "/" . $current->{file};
-    system("ln $fn $procfile") == 0 or die "Cannot ln $fn to $procfile";
-
-    sub format_changes {
-        %delta = %{$current};
-        foreach my $key ( keys %{$current} ) {
-            if ( $current->{$key} eq $previous->{$key} ) {
-                $delta{$key} = $MD . $delta{$key} . $LO;
+        $c
+            = $scr->get_char(
+            "&Quit,&ListProgams,&Refresh,&file,&Delete-file,&Program,&Series,&Episode,&section,&Back"
+                . $extra_option
+                . "?" );
+        given ($c) {
+            when (/[bB]/) {
+                return -1;
             }
-            else {
-                $delta{$key} = $HI . $delta{$key} . $LO;
-                $previous->{$key} = $current->{$key};
+            when (/[fF]/) {
+                if ( $curr_file->{section_count} == 0 ) {
+                    $scr->display_status("No sections defined, so 'F' disabled");
+                    next;
+                }
+                return +1;
             }
-        }
-        $result
-            = sprintf "File %s Prog %s Ser %s Epis %s Sect %s (#%d):",
-            $delta{file},
-            $delta{program},
-            $delta{series}, $delta{episode}, $delta{section},
-            @{$new_files}[$file_sub]->{section_count};
-        return $result;
-    }
-OUTER: while (1) {
-        $screen->show_values(
-            $current->{file},    $current->{program}, $current->{series}, $current->{episode},
-            $current->{section}, $start_time,         $end_time
-        );
-        $char = $screen->get_char( format_changes() );
-        my $saved;
-        given ($char) {
-            when (/[bB]/) { last OUTER; }
+            when ('L') {
+                s02222_get_program();
+            }
             when ('P') {
-                $current->{program} = get_program( $current->{program} );
+                my $res = $scr->get_string( "Program name", $curr_values->{program} );
+                if ( $res ne $curr_values->{program} ) {
+                    $curr_values->{program} = $res;
+                    $curr_values->{series}  = 1;
+                    $curr_values->{episode} = 1;
+                    $curr_values->{section} = 0;
+                }
             }
             when ('S') {
-                $saved = $current->{series};
-                $current->{series} = $screen->get_string( "Series", $saved + 1 );
-                $screen->print_status("Series changed from $saved to $current->{series} ");
+                $curr_values->{series}
+                    = $scr->get_number( "Series number", $curr_values->{series} + 1 );
+                $curr_values->{episode} = 1;
+                $curr_values->{section} = 0;
             }
             when ('E') {
-                $saved = $current->{episode};
-                $current->{episode} = $screen->get_string( "Episode", $saved + 1 );
-                $screen->print_status("Series changed from $saved to $current->{episode} ");
-                $current->{section} = 0;
-            }
-            when ('f') { last OUTER; }
-            when ('F') {
-                $skip_files_with_sections = 1;
-                last OUTER;
-            }
-            when (/[dD]/) {
-            INNER: while (1) {
-                    $ichar = $ichar = $screen->get_char("Are you sure you want to delete $fn?");
-                    last INNER if $ichar =~ "[yYnN]";
-                }
-                if ( $ichar =~ "[Yy]" ) {
-                    $db->db_execute(
-                        qq(update raw_file set status=99 where name="$current->{file}"));
-                    rename $fn, $fn . ".remove";
-                    last OUTER;
-                }
+                $curr_values->{episode}
+                    = $scr->get_number( "Episode number", $curr_values->{episode} + 1 );
+                $curr_values->{section} = 0;
             }
             when ('s') {
-                if ( $current->{program} eq "" ) {
-                    $screen->print_status("You must define Program first");
-                    next OUTER;
-                }
-                $current->{section} = $screen->get_number( "section", $current->{section} + 1 );
-                $start_time         = "00:00:00.000";
-                $end_time           = $video_length;
-            INNER: while (1) {
-                    $start_new = $screen->get_timestamp( "Start time", $start_time );
-                    $screen->show_values(
-                        $current->{file},    $current->{program}, $current->{series},
-                        $current->{episode}, $current->{section}, $start_time,
-                        $end_time
-                    );
-                    $end_new = $screen->get_timestamp( "End time", $end_time );
-                    $screen->show_values(
-                        $current->{file},    $current->{program}, $current->{series},
-                        $current->{episode}, $current->{section}, $start_time,
-                        $end_time
-                    );
-                    $ichar = $screen->get_char("$start_new -> $end_new     Y=OK (B=Back)?");
-                    last INNER if $ichar =~ "[yYbB]";
-                }
-                if ( $ichar =~ "[yY]" ) {
-                    if ( save_results( $current, $start_new, $end_new, $file_sub ) == 0 ) {
-                        $start_time = $start_new;
-                        $end_time   = $end_new;
-                        $screen->print_status(
-                            "Section created (Total for file=$current->section_count");
-                    }
-                    else {
-                        $screen->print_status("Section not created!");
-                    }
+                s02221_change_section($curr_values);
+                return -97;
+            }
+            when (/[dD]/) {
+                my $ichar = $scr->get_yn("Are you sure you want to delete $curr_values->{file}?");
+                if ( $ichar eq "y" ) {
+                    $db->delete_file( $curr_values->{file} );
+                    return -98;
                 }
             }
-            when (/[qQ]/) {
-                unlink $procfile or die "Cannot rm $procfile";
-                $procfile = "#;";
-                exit(0);
+            when (/[rR]/) {
+                return -96;
             }
+            when (/[xX]/) {
+                my $sections = " ";
+                my $res      = "-1";
+                @file_sections = $db->get_file_sections( $curr_file->{file} );
+                for ( my $n = 0; $n < @file_sections; $n++ ) {
+                    $sections = $sections . "$file_sections[$n]->{section_id} ";
+                }
+                if ( @file_sections > 1 ) {
+                    while ( index( $sections, " $res " ) == -1 and $res != 0 ) {
+                        $res = $scr->get_number("Which section_id shall I delete? ($sections)");
+                        printf "$res\n";
+                    }
+                    next if $res == 0;
+                }
+                else {
+                    $res = $file_sections[0]->{section_id};
+                }
+                my $ichar = $scr->get_yn("Are you sure you want to delete section_id $res?");
+                next if ( $ichar eq "n" );
+                $db->delete_section($res);
+                return -97;
+            }
+            when (/[qQ]/) { return -99; }
         }
     }
-    unlink $procfile or die "Cannot rm $procfile";
-    $procfile = "#";
-    return 1 if ( $char =~ "[bB]" );    # Go back to previous file
-    return 0;
+    exit();
 }
 
-=head2 process_new_files
-=cut
+sub s0223_tidy_file {
+    my $short_file = shift;
+    my $link_name  = "$pdir/$short_file";
+    unlink $link_name if -e $link_name;
+}
 
-sub process_new_files {
+sub s0224_delete_file {
+    my $short_file = shift;
+    my $fn         = "$mp4_dir/$short_file";
+    rename $fn, $fn . ".remove" or die "Failed to 'delete' $fn";
+}
 
-    # **
-    my %previous_value = ( file => "", program => "", series => 1, episode => 1, section => 0 );
-    my %current_value  = ( file => "", program => "", series => 1, episode => 1, section => 0 );
-    my $prompt;
-    my $file_sub;
-    my $file;
+sub s022_process_new_files {
 
-    $current_value{program} = $last_state->{program_name};
-    $current_value{series}  = $last_state->{series_number};
-    $current_value{episode} = $last_state->{episode_number};
-    $current_value{section} = $last_state->{section_number};
-    $file_sub               = 0;
-    while ( $file_sub < @{$new_files} ) {
-        $file = @{$new_files}[$file_sub];
-        unless ( $file->{section_count} == 0 or $skip_files_with_sections == 0 ) {
-            $file_sub++;
-            next;
+    my ($new_file_status) = @_;
+    my $file_sub = 0;
+    my $curr_file;
+    my $result;
+    my @file_sections;
+    my $skip_over_files_with_sections = 1;
+    my $last_file;
+
+    # Get the new files to process from the DB
+    my $all_files = $db->fetch_new_files();
+
+    # Get the details of the last section we processed as the starting values
+    my $last_values = $db->get_last_values();
+    my $curr_values = clone $last_values;
+    $scr->display_screen();
+    while ( $file_sub < @{$all_files} ) {
+        $curr_file = @{$all_files}[$file_sub];
+
+        # If a file we've already processed, then scroll it on the window and go on to the next
+        # UNLESS $skip_over_files_with_sections is 0 .............
+        if ( $curr_file->{file} ne $last_file ) {
+            if ( $curr_file->{section_count} > 0 ) {
+                @file_sections = $db->get_file_sections( $curr_file->{file} );
+                for ( my $n = 0; $n < @file_sections; $n++ ) {
+                    $scr->scroll( $file_sections[$n] );
+                }
+                if ( $skip_over_files_with_sections == 1 ) {
+                    $file_sub++;
+                    next;
+                }
+            }
         }
-        $current_value{file} = $file->{name};
+        $last_file                     = $curr_file->{file};
+        $skip_over_files_with_sections = 0;
+        $curr_values->{file}           = $curr_file->{file};
+        $curr_values->{start_time}     = "00:00:00.000";
+        $curr_values->{end_time}       = $curr_file->{video_length};
+        $curr_values->{video_length}   = $curr_file->{video_length};
 
-        #if ( process_file( \%previous_value, \%current_value, $file->{video_length} ) ) {
-        if ( process_file( \%previous_value, \%current_value, $file_sub ) ) {
-            $file_sub--;
-            $file_sub = 0 if $file_sub < 0;
+        #--
+        if (   $curr_file->{section_count} < 1
+            or $skip_over_files_with_sections == 0 )
+        {
+            $skip_over_files_with_sections = 0;   # We need this in case we need to step back a file
+            s0221_prepare_file( $curr_file->{file} );
+            $result = s0222_process_file( $curr_file, $curr_values, $last_values );
+            s0223_tidy_file( $curr_file->{file} );
+            given ($result) {
+                when (-96) {
+
+                    #Refresh screen
+                    $file_sub                      = 0;
+                    $last_file                     = "";
+                    $skip_over_files_with_sections = 1;
+                    next;
+                }
+                when (-97) {
+
+                    # We've deleted a section -re-read what we have
+                    $all_files = $db->fetch_new_files();
+                    next;
+                }
+                when (-98) {
+                    s0224_delete_file( $curr_file->{file} );
+                    splice( @{$all_files}, $file_sub, 1 );
+                    next;
+                }
+                when (-99) { last; }    # quit
+            }    # Skip over files with sections
         }
         else {
-            $file_sub++;
+            $scr->display_status( $curr_values->{file} . " has "
+                    . $curr_file->{section_count}
+                    . " section - skipping" );
+            sleep(0.25);
+            $last_values = clone $curr_values;
+            $scr->display_values( $curr_values, $curr_file->{section_count} );
         }
+        $file_sub += $result;
     }
 }
 
-=head2  init
-Process parameters and initialize variables
-=cut
-
-sub init {
-
-    # **
-    my %opts;
-    getopts( "d:", \%opts );
-    die pod2usage( verbose => 1 ) if $ARGV[0];
-    $dir = $opts{'d'} if exists $opts{'d'};
-    for my $fn (<$pdir/V*.mp4>) {
-        $screen->print_status("Found file from last run ($fn) - removing it");
-        unlink $fn or die "Cannot rm $fn";
-    }
+#    while ($file_sub < $new_file_status->db_total_count)
+sub s02_process {
+    s021_preprocess();
+    s022_process_new_files;
 }
 
 sub main {
-
-    # Process parameters and initialize variables
-    init();
-
-    # Get last 8 sections of video processed
-    # Put a list of new mp4 files on filesystem into table new_files
-    fetch_new_files();    # Puts results into $new_files
-    $last_state = fill_buff();
-    process_new_files();
+    s01_init();
+    #
+    s02_process();
+    print "yup";
 }
-eval { main() };
-close(LOG);
-warn if $@;
-exit(1) if $@;
-
-#=========================== POD ============================#
-
-=head1 NAME
-
-  identify_videos.pl - Identify new videos and cut points in mp4 input
-
-=head1 SYNOPSIS
-
-  identify_videos.pl [-d directory] 
-
-=head1 ARGUMENTS
-
-=over 4
-
-=item *
-<directory>	Directory to process for new video files (instead of default)
-
-=item *
-  <unit_test>	Unit test to run
-
-=back
-
-=head1 SEE ALSO
-
-  -
-
-=head1 COPYRIGHT
-
-  Dave Lane (April 2020)
-
-=cut
+main();
