@@ -44,14 +44,14 @@ sub import {
 
 =head2 read_params
 Fetch the parameters from a parameter file using mysql utility. In MariaDB,
-this function no longer exists, so I created a dummy script in /usr/local/bin
+this function no longer exists, so I created a dummy script 
 which produces the same results.
 =cut
 
 sub read_params {
     my ($login_path) = @_;
     my %arr;
-    open( PARAMS, "/usr/local/bin/my_print_defaults -s ${login_path}|" );
+    open( PARAMS, $ENV{"HOME"} . "/dev/videos/my_print_defaults -s ${login_path}|" );
     while (<PARAMS>) {
         chomp;
         m/^\w*--([^=]*)=\s*([^\s]*)\s*$/;

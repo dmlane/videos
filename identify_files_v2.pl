@@ -2,7 +2,6 @@
 use strict;
 use File::Basename;
 use Term::ANSIColor qw(colored);
-use Term::Menus;
 use MP4::Info;
 use Const::Fast;
 use lib dirname(__FILE__);
