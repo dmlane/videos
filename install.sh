@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+shopt -s expand_aliases
+if [ $(uname -s) == Linux ] ; then
+	alias cpanm="sudo cpanm"
+fi
 # Portable way to get real path .......
 readlinkf(){ perl -MCwd -e 'print Cwd::abs_path shift' "$1";}
 
@@ -24,8 +28,9 @@ function brew_install {
 	
 }
 function linux_packages {
-	#apt_install vim /usr/bin/vim
-	:
+	# perldoc can be  a place holder which always fails - CPAN should always 
+	# exist, so this should work ....
+	perldoc -l CPAN >/dev/null || apt_install perl-doc 
 }
 function mac_packages {
 	test -f /usr/local/bin/brew ||\
