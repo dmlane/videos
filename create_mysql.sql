@@ -28,6 +28,7 @@ CREATE TABLE episode (
   id int(11) unsigned NOT NULL AUTO_INCREMENT, 
   series_id int(11) unsigned NOT NULL, 
   episode_number int(3) unsigned NOT NULL, 
+  status int(2) default 0
   PRIMARY KEY (id), 
   UNIQUE KEY series_id (series_id, episode_number), 
   CONSTRAINT episode_ibfk_1 FOREIGN KEY (series_id) REFERENCES series (id) ON DELETE CASCADE
@@ -69,7 +70,8 @@ select
   b.series_number, 
   b.max_episodes, 
   c.id episode_id, 
-  c.episode_number, 
+  c.episode_number,
+  c.status episode_status,
   d.id section_id, 
   d.section_number, 
   d.start_time, 
