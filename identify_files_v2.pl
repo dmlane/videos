@@ -275,7 +275,7 @@ sub s022_process_new_files {
         # If a file we've already processed, then scroll it on the window and go on to the next
         # UNLESS $skip_over_files_with_sections is 0 .............
         if ( $curr_file->{file} ne $last_file ) {
-            if ( $curr_file->{section_count} > 0 ) {
+            if ( $curr_file->{section_count} > 0  ) {
                 @file_sections = $db->get_file_sections( $curr_file->{file} );
                 for ( my $n = 0; $n < @file_sections; $n++ ) {
                     $scr->scroll( $file_sections[$n] );

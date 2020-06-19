@@ -97,5 +97,41 @@ from
   left outer join section b on a.id = b.raw_file_id 
 where 
   b.raw_file_id is null;
+
+create view durations as 
+select 
+  a.name program_name, 
+  b.series_number, 
+  c.episode_number,
+  sum(time_to_sec(d.end_time)-time_to_sec(d.start_time)) duration
+from 
+  program a 
+  left outer join series b on b.program_id = a.id 
+  left outer join episode c on c.series_id = b.id 
+  left outer join section d on d.episode_id = c.id 
+  group by program_name,series_number,c.episode_number;
+drop view orphan_mp4;
+create view orphan_mp4 as 
+select 
+  a.* 
+from 
+  raw_file a 
+  left outer join section b on a.id = b.raw_file_id 
+where 
+  b.raw_file_id is null;
+
 commit;
 
+create view outliers as
+select * from (SELECT t1.program_name ,t1.series_number,t1.episode_number,t1.duration outlier,
+       t2.valAvg  average
+FROM durations t1
+INNER JOIN
+(
+    SELECT program_name, AVG(duration) valAvg, STDDEV(duration) valStd
+    FROM durations
+    GROUP BY program_name
+) t2
+    ON t1.program_name = t2.program_name
+WHERE ABS(t1.duration - t2.valAvg) > t2.valStd
+) t3 where program_name in (select program_name from videos where episode_status=0);

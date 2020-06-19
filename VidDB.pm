@@ -182,6 +182,7 @@ sub fetch_row {
 
 =head2 get_last_values
 =cut
+
 sub get_last_values {
     my ($self) = @_;
     my $res = $self->fetch_row(
@@ -345,5 +346,27 @@ sub add_section {
     );
     #
     $self->disconnect();
+}
+
+#----------------------------------------------------------------------------------------
+# For diagnostic routines
+sub get_ordered_sections {
+    my ($self) = @_;
+
+    # Get a list of all programs and episodes with a total time
+    return $self->fetch(
+        qq(select section_id,program_name,series_number,episode_number,section_number,time_to_sec(start_time) start_time,time_to_sec(end_time) end_time,k1,k2,
+                        time_to_sec(end_time)-time_to_sec(start_time) duration
+                    from videos where episode_status=0
+                    order by program_name,series_number,episode_number,section_number)
+    );
+}
+
+sub get_outliers {
+    my ($self) = @_;
+    return $self->fetch(
+        qq(select program_name,series_number,episode_number from outliers order by program_name,series_number,episode_number;
+    )
+    );
 }
 1;
