@@ -51,7 +51,9 @@ which produces the same results.
 sub read_params {
     my ($login_path) = @_;
     my %arr;
-    open( PARAMS, $ENV{"HOME"} . "/dev/videos/my_print_defaults -s ${login_path}|" );
+	my $cmd=$ENV{"HOME"} . "/dev/videos/my_print_defaults";
+	die "$cmd missing" unless -e $cmd;
+    open( PARAMS, $cmd . " -s ${login_path}|" );
     while (<PARAMS>) {
         chomp;
         m/^\w*--([^=]*)=\s*([^\s]*)\s*$/;

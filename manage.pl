@@ -14,7 +14,7 @@ use Time::HiRes qw (sleep);
 use feature 'switch';
 no warnings 'experimental::smartmatch';
 
-use Term::Menus;
+#use Term::Menus;
 
 my $db;
 my %prog;
