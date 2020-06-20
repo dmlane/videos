@@ -14,13 +14,11 @@ const our $logfile_dir => $ENV{"HOME"} . "/data";
 our %env_params = (
     TEST => {
         login_path => "testdb",
-        database   => "test",
-        log        => "test.log"
+        database   => "test"
     },
     PROD => {
         login_path => "videos",
-        database   => "videos",
-        log        => "videos.log"
+        database   => "videos"
     }
 );
 our $gEnvironment;
@@ -49,39 +47,49 @@ which produces the same results.
 =cut
 
 sub read_params {
+
     my ($login_path) = @_;
     my %arr;
-	my $cmd=$ENV{"HOME"} . "/dev/videos/my_print_defaults";
-	die "$cmd missing" unless -e $cmd;
-    open( PARAMS, $cmd . " -s ${login_path}|" );
-    while (<PARAMS>) {
+    my $cmd = $ENV{"HOME"} . "/dev/videos/my_print_defaults";
+    my $params;
+    my $msg;
+
+    die "$cmd missing" unless -e $cmd;
+    open( $params, "-|", $cmd . " -s ${login_path}" );
+    while (<$params>) {
         chomp;
         m/^\w*--([^=]*)=\s*([^\s]*)\s*$/;
         $arr{$1} = $2;
     }
-    close(PARAMS);
+    close($params);
+    $msg = sprintf( "Host '%s',Port '%s',User '%s',Password '%s'\n Something not defined",
+        $arr{host}, $arr{port}, $arr{user}, $arr{password} );
+    die $msg
+        unless exists $arr{host}
+        and exists $arr{port}
+        and exists $arr{user}
+        and exists $arr{password};
     return %arr;
 }
 
-sub log {
-    my ( $self, $rec ) = @_;
-    if ( $log_opened == 0 ) {
-        my $logfile      = "$logfile_dir/$env_params{$gEnvironment}->{log}";
-        my $modtime      = ( stat($logfile) )[9];
-        my $logfile_copy = "$logfile." . $modtime;
-        if ( -e $logfile ) {
-            copy $logfile, $logfile_copy or die "Cannot make backup copy of log";
-            utime( undef, $modtime, $logfile_copy );
-        }
-        open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
-        $log_opened = 1;
-    }
-    printf LOG "%7.7d,%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n",
-        $rec->{section_id}, $rec->{file}, $rec->{start_time}, $rec->{end_time},
-        $rec->{program}, $rec->{series}, $rec->{episode},
-        $rec->{section};
-}
-
+# sub log {
+#     my ( $self, $rec ) = @_;
+#     if ( $log_opened == 0 ) {
+#         my $logfile      = "$logfile_dir/$env_params{$gEnvironment}->{log}";
+#         my $modtime      = ( stat($logfile) )[9];
+#         my $logfile_copy = "$logfile." . $modtime;
+#         if ( -e $logfile ) {
+#             copy $logfile, $logfile_copy or die "Cannot make backup copy of log";
+#             utime( undef, $modtime, $logfile_copy );
+#         }
+#         open( LOG, '>>', $logfile ) or die "Cannot open log file $logfile";
+#         $log_opened = 1;
+#     }
+#     printf LOG "%7.7d,%s,%s,%s,%s,%2.2d,%2.2d,%2.2d\n",
+#         $rec->{section_id}, $rec->{file}, $rec->{start_time}, $rec->{end_time},
+#         $rec->{program}, $rec->{series}, $rec->{episode},
+#         $rec->{section};
+# }
 sub new {
     my ($class) = @_;
     my $self = {
@@ -97,10 +105,9 @@ sub new {
     bless $self, $class;
 }
 
-sub destroy {
-    close LOG if $log_opened == 1;
-}
-
+# sub destroy {
+#     close LOG if $log_opened == 1;
+# }
 sub connect {
     my $self = shift;
     return
@@ -182,6 +189,11 @@ sub fetch_row {
 #=========================================================================#
 #=========================================================================#
 
+sub check_file_in_db {
+    my ($self,$fn) = @_;
+    my $res=$self->fetch_number(qq(select count(*) from raw_file where name='$fn'));
+    return $res;
+}
 =head2 get_last_values
 =cut
 
@@ -258,11 +270,12 @@ sub fetch_new_files {
     my ($self) = @_;
     return $self->fetch(
         qq( 
-        select a.name file,a.video_length,a.last_updated,count(b.section_number) section_count
+        select a.name file,a.video_length,a.last_updated,a.status raw_status,
+        count(b.section_number) section_count
         from  raw_file a
             left outer join section b on b.raw_file_id =a.id
-            where a.status=0 
-            group by a.name
+            where a.status<2
+            group by a.name,a.status
               order by k1,k2;
               )
     );

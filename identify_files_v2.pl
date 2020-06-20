@@ -49,9 +49,11 @@ sub s021_preprocess {
     # Add any new files to the database
     foreach my $full_name (@new_files) {
         $val{file} = basename $full_name;
-        $info      = get_mp4info($full_name);
-        $vhours    = int( $info->{MM} / 60 );
-        $vmins     = int( $info->{MM} % 60 );
+        next
+            if ( $db->check_file_in_db( $val{file} ) ); # Could do this better by fetching all files
+        $info   = get_mp4info($full_name);
+        $vhours = int( $info->{MM} / 60 );
+        $vmins  = int( $info->{MM} % 60 );
         $val{video_length}
             = sprintf( "%02d:%02d:%02d.%003d", $vhours, $vmins, $info->{SS}, $info->{MS} );
 
