@@ -188,12 +188,12 @@ sub fetch_row {
 
 #=========================================================================#
 #=========================================================================#
-
 sub check_file_in_db {
-    my ($self,$fn) = @_;
-    my $res=$self->fetch_number(qq(select count(*) from raw_file where name='$fn'));
+    my ( $self, $fn ) = @_;
+    my $res = $self->fetch_number(qq(select count(*) from raw_file where name='$fn'));
     return $res;
 }
+
 =head2 get_last_values
 =cut
 
@@ -377,11 +377,45 @@ sub get_ordered_sections {
     );
 }
 
+sub get_episode_counts {
+    my ($self) = @_;
+
+    # Get a list of all programs and episodes with a total time
+    return $self->fetch(
+        qq(select  program_name,series_number,max_episodes
+                    from videos where episode_status=0
+                    group by program_name,series_number)
+    );
+}
+
 sub get_outliers {
     my ($self) = @_;
     return $self->fetch(
-        qq(select program_name,series_number,episode_number from outliers order by program_name,series_number,episode_number;
+        qq(select distinct program_name,series_number,episode_number from outliers 
+            order by program_name,series_number,episode_number;
     )
+    );
+}
+
+sub accept_series {
+    my ( $self, $program, $series ) = @_;
+    $self->exec(
+        qq(
+           update episode set status=1 where id in (
+                select episode_id from videos 
+                    where program_name="$program" and series_number=$series
+           ) and status=0
+           )
+    );
+}
+
+sub set_max_episodes {
+    my ( $self, $program_name, $series_number, $max_episodes ) = @_;
+    $self->exec(
+        qq(update series set max_episodes=$max_episodes where id in (
+            select series_id from videos where program_name="$program_name"
+            and series_number=$series_number
+            ))
     );
 }
 1;

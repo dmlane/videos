@@ -97,7 +97,7 @@ from
   left outer join section b on a.id = b.raw_file_id 
 where 
   b.raw_file_id is null;
-
+drop view durations;
 create view durations as 
 select 
   a.name program_name, 
@@ -121,9 +121,9 @@ where
   b.raw_file_id is null;
 
 commit;
-
+drop view outliers;
 create view outliers as
-select * from (SELECT t1.program_name ,t1.series_number,t1.episode_number,t1.duration outlier,
+SELECT t1.program_name ,t1.series_number,t1.episode_number,t1.duration outlier,
        t2.valAvg  average
 FROM durations t1
 INNER JOIN
@@ -134,4 +134,5 @@ INNER JOIN
 ) t2
     ON t1.program_name = t2.program_name
 WHERE ABS(t1.duration - t2.valAvg) > t2.valStd
-) t3 where program_name in (select program_name from videos where episode_status=0);
+and t1.program_name in (select program_name from videos where episode_status=0)
+;
