@@ -54,8 +54,7 @@ sub s020_set_episode_count {
                 last;
             }
         }
-
-        #if ($ptr->{max_episodes}
+ 
     }
 }
 

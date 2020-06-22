@@ -37,13 +37,13 @@ sub s01_init {
 sub s021_preprocess {
     my ( $fn, $info, $vhours, $vmins );
     my %val;
-    if ( $db_file_count > 1 ) {
+    # if ( $db_file_count > 1 ) {
 
-        # It looks as if the files have already been added
-        $scr->display_status(
-            "File processing skipped and using DB - " . $db_file_count . " files to process" );
-        return;
-    }
+    #     # It looks as if the files have already been added
+    #     $scr->display_status(
+    #         "File processing skipped and using DB - " . $db_file_count . " files to process" );
+    #     return;
+    # }
     $db->connect();
 
     # Add any new files to the database
